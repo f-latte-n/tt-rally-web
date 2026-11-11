@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ラリー検出 試作</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --sub:#666; --line:#ddd; --acc:#0a66c2; --ball:#e08a00; --seg:#0a66c2; --py:#2a9d55; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --sub:#999; --line:#333; --acc:#5aa9ff; --seg:#5aa9ff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 12px 16px 40px; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 760px; margin-inline: auto; }
+  h1 { font-size: 18px; margin: 4px 0 12px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  label { font-size: 14px; }
+  button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--acc);
+           background: var(--acc); color: #fff; }
+  button.sub { background: transparent; color: var(--acc); }
+  button:disabled { opacity: .4; }
+  progress { width: 100%; height: 10px; }
+  .muted { color: var(--sub); font-size: 13px; }
+  .err { color: #d33; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  td, th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  td.n { text-align: right; }
+  video, canvas.full { width: 100%; display: block; background: #000; border-radius: 6px; }
+  #segs tr { cursor: pointer; }
+  #segs tr.on { background: color-mix(in srgb, var(--acc) 18%, transparent); }
+  textarea { width: 100%; height: 70px; font: 12px ui-monospace, monospace; }
+  #timeline { width: 100%; height: 56px; display: block; }
+</style>
+</head>
+<body>
+<h1>ラリー検出 試作（速度計測）</h1>
+
+<div class="row">
+  <input type="file" id="file" accept="video/*,.mov,.mp4">
+</div>
+<div class="row" style="margin-top:8px">
+  <label><input type="checkbox" id="optDetect" checked> 検出する（外すとデコードのみ）</label>
+  <label>読み出し <select id="optRead"><option value="copy">copyTo(YUV)</option><option value="canvas">canvas</option><option value="canvas-wrf">canvas+wrf</option></select></label>
+  <label>HW <select id="optHw"><option value="">既定</option><option>prefer-hardware</option><option>prefer-software</option></select></label>
+  <button id="start" disabled>解析開始</button>
+</div>
+<div id="env" class="muted"></div>
+
+<div style="margin-top:10px"><progress id="prog" value="0" max="1"></progress></div>
+<div id="status" class="muted">動画を選んでください</div>
+<div id="error" class="err"></div>
+
+<h2>結果</h2>
+<table id="stats"></table>
+<div class="row" style="margin-top:6px"><button class="sub" id="copy" disabled>結果をコピー（JSON）</button><span id="copied" class="muted"></span></div>
+
+<h2>区間</h2>
+<canvas id="timeline"></canvas>
+<div class="muted">橙=球フレーム　青=検出区間　緑=Python区間（照合時）</div>
+<video id="video" playsinline controls muted style="margin-top:8px"></video>
+<table id="segs"></table>
+
+<h2>ROI確認（1フレーム目）</h2>
+<canvas id="preview" class="full"></canvas>
+
+<h2>Python結果と照合</h2>
+<div class="muted">prototype/segment.py の segs.json の中身を貼り付け</div>
+<textarea id="pyjson" placeholder="[[0.0, 14.6], [14.9, 21.0], ...]"></textarea>
+<div class="row"><button class="sub" id="cmp">照合</button><span id="cmpsum"></span></div>
+<table id="cmptab"></table>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+const ms = (x) => (x / 1000).toFixed(2) + ' s';
+let file = null, info = null, result = null, pySegs = null, worker = null, segEnd = null;
+
+$('env').textContent = (typeof VideoDecoder === 'undefined' ? '⚠ WebCodecs非対応（HTTPSまたはlocalhostで開く必要あり）　' : '')
+  + navigator.userAgent.replace(/Mozilla\/5.0 /, '');
+
+$('file').onchange = () => {
+  file = $('file').files[0]; if (!file) return;
+  $('video').src = URL.createObjectURL(file);
+  $('start').disabled = false;
+  $('status').textContent = `${file.name}（${(file.size / 1e6).toFixed(0)} MB）`;
+};
+
+$('start').onclick = () => {
+  if (worker) worker.terminate();
+  result = null; info = null; $('error').textContent = ''; $('segs').innerHTML = ''; $('stats').innerHTML = '';
+  $('copy').disabled = true; $('start').disabled = true; drawTimeline();
+  const opts = { detect: $('optDetect').checked, read: $('optRead').value, hw: $('optHw').value };
+  worker = new Worker('worker.js');
+  worker.onmessage = (e) => onMsg(e.data, opts);
+  worker.onerror = (e) => { $('error').textContent = 'Worker: ' + e.message; $('start').disabled = false; };
+  worker.postMessage({ type: 'start', file, opts });
+  $('status').textContent = '準備中…';
+};
+
+function onMsg(m, opts) {
+  if (m.type === 'info') { info = m; info.opts = opts; }
+  else if (m.type === 'progress') {
+    $('prog').max = m.total; $('prog').value = m.done;
+    $('status').textContent = `${m.done} / ${m.total} フレーム　${(m.done / m.elapsed * 1000).toFixed(0)} fps　${ms(m.elapsed)}`;
+  } else if (m.type === 'preview') drawPreview(m.bmp, m.roi);
+  else if (m.type === 'error') { $('error').textContent = m.message; $('start').disabled = false; }
+  else if (m.type === 'done') {
+    result = m; $('prog').value = $('prog').max; $('start').disabled = false; $('copy').disabled = false;
+    $('status').textContent = '完了';
+    showStats(); showSegs(); drawTimeline();
+    if (pySegs) compare();
+    worker.terminate(); worker = null;
+  }
+}
+
+function showStats() {
+  const s = result.stats, n = result.frames, rows = [
+    ['動画', `${info.codec}　${info.width}x${info.height}　${info.fps.toFixed(2)} fps　${info.duration.toFixed(1)} s　${n} フレーム`],
+    ['全体', `${ms(s.total)}　→ <b>${(n / s.total * 1000).toFixed(0)} fps</b>（実時間の ${(info.duration * 1000 / s.total).toFixed(2)} 倍速）`],
+    ['デコード待ち等', `${ms(s.other)}　（デコード単体は「検出する」を外して計測）`],
+    ['ROI読み出し', info.opts.detect ? `${ms(s.grab)}　${(s.grab / n).toFixed(2)} ms/枚　[${result.method}]` : '—'],
+    ['検出（JS）', info.opts.detect ? `${ms(s.detect)}　${(s.detect / n).toFixed(2)} ms/枚` : '—'],
+    ['ファイル読込 / demux', `${ms(s.io)} / ${ms(s.demux)}`],
+    ['追跡・区間化', ms(s.post)],
+    ['検出結果', info.opts.detect ? `${result.segs.length} 区間　計 ${result.segs.reduce((a, [x, y]) => a + y - x, 0).toFixed(0)} s　（軌跡 ${result.chains}）` : '—'],
+  ];
+  $('stats').innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
+}
+
+function showSegs() {
+  $('segs').innerHTML = result.segs.map(([a, b], i) =>
+    `<tr data-i="${i}"><td class="n">${i + 1}</td><td>${fmt(a)} – ${fmt(b)}</td><td class="n">${(b - a).toFixed(1)} s</td><td>▶</td></tr>`).join('');
+  [...$('segs').rows].forEach((tr) => tr.onclick = () => playSeg(+tr.dataset.i));
+}
+
+function playSeg(i) {
+  const [a, b] = result.segs[i], v = $('video');
+  [...$('segs').rows].forEach((tr) => tr.classList.toggle('on', +tr.dataset.i === i));
+  segEnd = b; v.currentTime = a; v.play();
+}
+$('video').ontimeupdate = () => { const v = $('video'); if (segEnd != null && v.currentTime >= segEnd) { v.pause(); segEnd = null; } };
+$('video').onseeking = () => { if (segEnd != null && $('video').currentTime > segEnd) segEnd = null; };
+
+function drawPreview(bmp, roi) {
+  const c = $('preview'); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+  const s = bmp.width / 640; g.strokeStyle = '#ff0'; g.lineWidth = 2;
+  g.strokeRect(roi.x * s, roi.y * s, roi.w * s, roi.h * s);
+}
+
+function drawTimeline() {
+  const c = $('timeline'), dpr = devicePixelRatio || 1, W = c.clientWidth, H = 56;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const css = getComputedStyle(document.documentElement), col = (n) => css.getPropertyValue(n);
+  g.fillStyle = col('--line'); g.fillRect(0, 0, W, H);
+  if (!result || !info) return;
+  const T = result.times[result.times.length - 1] || info.duration, X = (t) => t / T * W;
+  g.fillStyle = col('--ball');
+  for (let f = 0; f < result.ev.length; f++) if (result.ev[f]) g.fillRect(X(result.times[f]), 0, 1, 14);
+  g.fillStyle = col('--seg');
+  for (const [a, b] of result.segs) g.fillRect(X(a), 18, Math.max(1, X(b) - X(a)), 16);
+  if (pySegs) { g.fillStyle = col('--py'); for (const [a, b] of pySegs) g.fillRect(X(a), 38, Math.max(1, X(b) - X(a)), 16); }
+}
+addEventListener('resize', drawTimeline);
+
+$('copy').onclick = async () => {
+  const out = { ua: navigator.userAgent, file: { name: file.name, size: file.size }, info, method: result.method, stats: result.stats,
+                frames: result.frames, segs: result.segs.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]) };
+  const txt = JSON.stringify(out);
+  try { await navigator.clipboard.writeText(txt); $('copied').textContent = 'コピーしました'; }
+  catch { $('pyjson').value = txt; $('copied').textContent = 'コピー不可のため下の欄に出力'; }
+};
+
+// IoU で対応づけ（0.5以上を一致とみなす）
+$('cmp').onclick = () => {
+  try { pySegs = JSON.parse($('pyjson').value); } catch { $('cmpsum').textContent = 'JSONを読めません'; return; }
+  if (result) compare(); drawTimeline();
+};
+function compare() {
+  const iou = (p, q) => { const i = Math.max(0, Math.min(p[1], q[1]) - Math.max(p[0], q[0])); return i / (Math.max(p[1], q[1]) - Math.min(p[0], q[0])); };
+  let hit = 0;
+  const rows = pySegs.map((p, i) => {
+    let bi = -1, bv = 0; result.segs.forEach((q, j) => { const v = iou(p, q); if (v > bv) { bv = v; bi = j; } });
+    if (bv >= 0.5) hit++;
+    const q = result.segs[bi];
+    return `<tr><td class="n">${i + 1}</td><td>${fmt(p[0])} – ${fmt(p[1])}</td><td>${bi < 0 ? '—' : `#${bi + 1}　開始${(q[0] - p[0]).toFixed(2)}　終了${(q[1] - p[1]).toFixed(2)}`}</td><td class="n">${bv.toFixed(2)}</td></tr>`;
+  });
+  $('cmptab').innerHTML = `<tr><th>Py</th><th>区間</th><th>JSの対応（差 s）</th><th>IoU</th></tr>` + rows.join('');
+  $('cmpsum').textContent = `一致 ${hit} / Python ${pySegs.length}（JS ${result.segs.length}）`;
+}
+</script>
+</body>
+</html>
