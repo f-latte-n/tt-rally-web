@@ -40,7 +40,7 @@
 <div class="row" style="margin-top:8px">
   <label><input type="checkbox" id="optDetect" checked> 検出する（外すとデコードのみ）</label>
   <label>読み出し <select id="optRead"><option value="copy">copyTo(YUV)</option><option value="canvas">canvas</option><option value="canvas-wrf">canvas+wrf</option></select></label>
-  <label>色範囲 <select id="optRange"><option value="">自動</option><option value="limited">リミテッド固定</option><option value="full">フル固定</option></select></label>
+  <label>色範囲 <select id="optRange"><option value="">自動</option><option value="limited">リミテッド固定</option><option value="full">フル固定</option><option value="undo">引き延ばし逆変換</option></select></label>
   <label>HW <select id="optHw"><option value="">既定</option><option>prefer-hardware</option><option>prefer-software</option></select></label>
   <button id="start" disabled>解析開始</button>
 </div>
@@ -76,7 +76,7 @@ const ms = (x) => (x / 1000).toFixed(2) + ' s';
 let file = null, info = null, result = null, pySegs = null, worker = null, segEnd = null;
 
 // 更新したら上げる（Worker側のキャッシュ対策。worker.js / detect.js をこの番号付きで読む）
-const VER = '3';
+const VER = '4';
 $('env').textContent = `v${VER}　` + (typeof VideoDecoder === 'undefined' ? '⚠ WebCodecs非対応（HTTPSまたはlocalhostで開く必要あり）　' : '')
   + navigator.userAgent.replace(/Mozilla\/5.0 /, '');
 

@@ -183,7 +183,26 @@
     }
   }
 
-  const api = { PARAMS, Detector, track, segment, yuvToRgba };
+  // iPhone(WebKit)は limited の映像を full に引き延ばして VideoFrame を返す。
+  // その式（実測で特定）：Y' = floor(1.16425*(Y-16)+0.51)、C' = floor(1.1381*(C-128)+128.485)
+  // 単調なので逆表を作れば元の値に正確に戻せる。
+  function makeInverse(f, lo, hi) {
+    const inv = new Uint8Array(256), hit = new Int16Array(256).fill(-1);
+    for (let v = lo; v <= hi; v++) { const q = Math.min(255, Math.max(0, f(v))); if (hit[q] < 0) hit[q] = v; }
+    let last = lo; // 写像されない値は直前の値に寄せる
+    for (let q = 0; q < 256; q++) { if (hit[q] >= 0) last = hit[q]; inv[q] = last; }
+    return inv;
+  }
+  const INV_Y = makeInverse((v) => Math.floor(1.16425 * (v - 16) + 0.51), 0, 255);
+  const INV_C = makeInverse((v) => Math.floor(1.1381 * (v - 128) + 128.485), 0, 255);
+  // buf の Y/UV 平面（w×h の範囲）をその場で limited に戻す
+  function unexpandRange(buf, format, layout, w, h) {
+    for (let y = 0; y < h; y++) { const r = layout[0].offset + y * layout[0].stride; for (let x = 0; x < w; x++) buf[r + x] = INV_Y[buf[r + x]]; }
+    const planes = format === 'NV12' ? [[layout[1], w]] : [[layout[1], w >> 1], [layout[2], w >> 1]];
+    for (const [pl, cw] of planes) for (let y = 0; y < h >> 1; y++) { const r = pl.offset + y * pl.stride; for (let x = 0; x < cw; x++) buf[r + x] = INV_C[buf[r + x]]; }
+  }
+
+  const api = { PARAMS, Detector, track, segment, yuvToRgba, unexpandRange };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RallyDetect = api;
 })(typeof self !== 'undefined' ? self : this);

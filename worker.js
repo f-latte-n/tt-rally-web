@@ -1,6 +1,6 @@
 // デマックス(mp4box.js) → デコード(WebCodecs) → 縮小・ROI読み出し(OffscreenCanvas) → 検出(detect.js)
 importScripts('vendor/mp4box.all.min.js', 'detect.js' + self.location.search); // ?v= を引き継いでキャッシュ回避
-const { PARAMS, Detector, track, segment, yuvToRgba } = self.RallyDetect;
+const { PARAMS, Detector, track, segment, yuvToRgba, unexpandRange } = self.RallyDetect;
 const BASE_W = 640;
 const MAX_FRAMES = 8; // 同時に保持するフレーム数（読み出しの並行数）
 
@@ -52,13 +52,16 @@ async function openTrack(file) {
     box.write(s);
     description = new Uint8Array(s.buffer, 8); // boxヘッダを除く
   }
-  return { vt, samples: trak.samples, description };
+  // ファイル側の色範囲（colr nclx の full_range_flag）。無ければ limited とみなす
+  const colr = entry.colr || (entry.boxes || []).find((b) => b.type === 'colr');
+  const srcFull = !!(colr && colr.full_range_flag);
+  return { vt, samples: trak.samples, description, srcFull };
 }
 
 async function run(file, opts) {
   const st = { demux: 0, io: 0, grab: 0, detect: 0, post: 0 };
   const T0 = now();
-  const { vt, samples, description } = await openTrack(file);
+  const { vt, samples, description, srcFull } = await openTrack(file);
   st.demux = now() - T0;
 
   const config = { codec: vt.codec, codedWidth: vt.video.width, codedHeight: vt.video.height, description };
@@ -107,16 +110,22 @@ async function run(file, opts) {
       let buf = pool.pop();
       if (!buf || buf.length < size) buf = new Uint8Array(size);
       const cs = frame.colorSpace ? frame.colorSpace.toJSON() : null;
-      const full = opts.range === 'full' || (opts.range !== 'limited' && !!(cs && cs.fullRange));
-      if (!diag.first) diag.first = { fmt, cs, coded: [frame.codedWidth, frame.codedHeight], visible: vr.toJSON ? vr.toJSON() : vr, rect };
+      const frameFull = !!(cs && cs.fullRange);
+      // 自動：ファイルが limited なのにフレームが full → 端末が引き延ばしたので逆変換して limited で扱う
+      const undo = opts.range === 'undo' || (!opts.range && frameFull && !srcFull);
+      const full = !undo && (opts.range === 'full' || (opts.range !== 'limited' && frameFull));
+      if (!diag.first) diag.first = { fmt, cs, srcFull, undo, coded: [frame.codedWidth, frame.codedHeight], visible: vr.toJSON ? vr.toJSON() : vr, rect };
       return frame.copyTo(buf, { rect }).then((layout) => () => {
         const k = ts.length - 1;
-        if (DIAG_FRAMES.includes(k)) diag.frames[k] = yuvDigest(buf, fmt, layout, rect.width, rect.height);
         if (k === 0) diag.first.layout = layout;
+        const dg = DIAG_FRAMES.includes(k);
+        if (dg && undo) (diag.raw = diag.raw || {})[k] = yuvDigest(buf, fmt, layout, rect.width, rect.height);
+        if (undo) unexpandRange(buf, fmt, layout, rect.width, rect.height);
+        if (dg) diag.frames[k] = yuvDigest(buf, fmt, layout, rect.width, rect.height);
         // 色行列はOpenCV同様つねにBT.601（閾値はその条件で調整済み）
         yuvToRgba(buf, fmt, layout, rx * s - x0, ry * s - y0, s, rw, rh, rgba, { fullRange: full });
         pool.push(buf);
-        method = 'copyTo ' + fmt + (full ? ' full' : ' limited');
+        method = 'copyTo ' + fmt + (undo ? ' undo' : full ? ' full' : ' limited');
         return rgba;
       });
     }
