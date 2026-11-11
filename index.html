@@ -40,6 +40,7 @@
 <div class="row" style="margin-top:8px">
   <label><input type="checkbox" id="optDetect" checked> 検出する（外すとデコードのみ）</label>
   <label>読み出し <select id="optRead"><option value="copy">copyTo(YUV)</option><option value="canvas">canvas</option><option value="canvas-wrf">canvas+wrf</option></select></label>
+  <label>色範囲 <select id="optRange"><option value="">自動</option><option value="limited">リミテッド固定</option><option value="full">フル固定</option></select></label>
   <label>HW <select id="optHw"><option value="">既定</option><option>prefer-hardware</option><option>prefer-software</option></select></label>
   <button id="start" disabled>解析開始</button>
 </div>
@@ -88,7 +89,7 @@ $('start').onclick = () => {
   if (worker) worker.terminate();
   result = null; info = null; $('error').textContent = ''; $('segs').innerHTML = ''; $('stats').innerHTML = '';
   $('copy').disabled = true; $('start').disabled = true; drawTimeline();
-  const opts = { detect: $('optDetect').checked, read: $('optRead').value, hw: $('optHw').value };
+  const opts = { detect: $('optDetect').checked, read: $('optRead').value, range: $('optRange').value, hw: $('optHw').value };
   worker = new Worker('worker.js');
   worker.onmessage = (e) => onMsg(e.data, opts);
   worker.onerror = (e) => { $('error').textContent = 'Worker: ' + e.message; $('start').disabled = false; };
@@ -164,7 +165,7 @@ function drawTimeline() {
 addEventListener('resize', drawTimeline);
 
 $('copy').onclick = async () => {
-  const out = { ua: navigator.userAgent, file: { name: file.name, size: file.size }, info, method: result.method, stats: result.stats,
+  const out = { ua: navigator.userAgent, file: { name: file.name, size: file.size }, info, method: result.method, diag: result.diag, stats: result.stats,
                 frames: result.frames, segs: result.segs.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]) };
   const txt = JSON.stringify(out);
   try { await navigator.clipboard.writeText(txt); $('copied').textContent = 'コピーしました'; }

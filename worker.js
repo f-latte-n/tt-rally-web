@@ -75,6 +75,22 @@ async function run(file, opts) {
   const pos = [], ts = [];
   let ctx = null, method = '';
   const pool = []; // copyTo用バッファの使い回し
+  // 診断：特定フレームのROI(YUV)の合計とハッシュ。ffmpegのデコード結果と比べて端末差を調べる
+  const DIAG_FRAMES = [0, 100, 1800, 5000];
+  const diag = { frames: {}, tsBackward: 0 };
+  function yuvDigest(buf, fmt, layout, w, h) {
+    const nv12 = fmt === 'NV12';
+    let sy = 0, su = 0, sv = 0, hy = 0x811c9dc5;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = buf[layout[0].offset + y * layout[0].stride + x];
+      sy += v; hy = Math.imul(hy ^ v, 0x01000193) >>> 0;
+    }
+    for (let y = 0; y < h >> 1; y++) for (let x = 0; x < w >> 1; x++) {
+      if (nv12) { const o = layout[1].offset + y * layout[1].stride + x * 2; su += buf[o]; sv += buf[o + 1]; }
+      else { su += buf[layout[1].offset + y * layout[1].stride + x]; sv += buf[layout[2].offset + y * layout[2].stride + x]; }
+    }
+    return { sumY: sy, sumU: su, sumV: sv, hashY: hy.toString(16) };
+  }
   let frameErr = null, wake = null, lastProg = 0, pending = 0, chain = Promise.resolve();
 
   // ROI（640x360基準）の読み出しを開始する。copyTo は非同期なので複数フレーム並行に投げ、
@@ -90,12 +106,17 @@ async function run(file, opts) {
       const size = frame.allocationSize({ rect });
       let buf = pool.pop();
       if (!buf || buf.length < size) buf = new Uint8Array(size);
-      const full = !!(frame.colorSpace && frame.colorSpace.fullRange);
+      const cs = frame.colorSpace ? frame.colorSpace.toJSON() : null;
+      const full = opts.range === 'full' || (opts.range !== 'limited' && !!(cs && cs.fullRange));
+      if (!diag.first) diag.first = { fmt, cs, coded: [frame.codedWidth, frame.codedHeight], visible: vr.toJSON ? vr.toJSON() : vr, rect };
       return frame.copyTo(buf, { rect }).then((layout) => () => {
+        const k = ts.length - 1;
+        if (DIAG_FRAMES.includes(k)) diag.frames[k] = yuvDigest(buf, fmt, layout, rect.width, rect.height);
+        if (k === 0) diag.first.layout = layout;
         // 色行列はOpenCV同様つねにBT.601（閾値はその条件で調整済み）
         yuvToRgba(buf, fmt, layout, rx * s - x0, ry * s - y0, s, rw, rh, rgba, { fullRange: full });
         pool.push(buf);
-        method = 'copyTo ' + fmt;
+        method = 'copyTo ' + fmt + (full ? ' full' : ' limited');
         return rgba;
       });
     }
@@ -113,6 +134,7 @@ async function run(file, opts) {
       const job = opts.detect ? startGrab(frame) : null;
       if (job) job.catch(() => {});
       chain = chain.then(async () => {
+        if (ts.length && frame.timestamp <= ts[ts.length - 1]) diag.tsBackward++;
         ts.push(frame.timestamp);
         if (ts.length === 1) sendPreview(frame);
         if (job) {
@@ -173,7 +195,7 @@ async function run(file, opts) {
   st.post = now() - T1;
   const total = now() - T0;
   post({ type: 'done', segs, ev, times, chains, frames: ts.length,
-         method, stats: { total, ...st, other: Math.max(0, T1 - T0 - st.demux - st.io - st.grab - st.detect) } },
+         method, diag: { ...diag, cands: pos.reduce((n, c) => n + c.length, 0), ballFrames: ev.reduce((n, v) => n + v, 0) }, stats: { total, ...st, other: Math.max(0, T1 - T0 - st.demux - st.io - st.grab - st.detect) } },
        [ev.buffer, times.buffer]);
 }
 
