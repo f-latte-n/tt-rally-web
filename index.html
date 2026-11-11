@@ -75,7 +75,9 @@ const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')
 const ms = (x) => (x / 1000).toFixed(2) + ' s';
 let file = null, info = null, result = null, pySegs = null, worker = null, segEnd = null;
 
-$('env').textContent = (typeof VideoDecoder === 'undefined' ? '⚠ WebCodecs非対応（HTTPSまたはlocalhostで開く必要あり）　' : '')
+// 更新したら上げる（Worker側のキャッシュ対策。worker.js / detect.js をこの番号付きで読む）
+const VER = '3';
+$('env').textContent = `v${VER}　` + (typeof VideoDecoder === 'undefined' ? '⚠ WebCodecs非対応（HTTPSまたはlocalhostで開く必要あり）　' : '')
   + navigator.userAgent.replace(/Mozilla\/5.0 /, '');
 
 $('file').onchange = () => {
@@ -90,7 +92,7 @@ $('start').onclick = () => {
   result = null; info = null; $('error').textContent = ''; $('segs').innerHTML = ''; $('stats').innerHTML = '';
   $('copy').disabled = true; $('start').disabled = true; drawTimeline();
   const opts = { detect: $('optDetect').checked, read: $('optRead').value, range: $('optRange').value, hw: $('optHw').value };
-  worker = new Worker('worker.js');
+  worker = new Worker('worker.js?v=' + VER);
   worker.onmessage = (e) => onMsg(e.data, opts);
   worker.onerror = (e) => { $('error').textContent = 'Worker: ' + e.message; $('start').disabled = false; };
   worker.postMessage({ type: 'start', file, opts });
@@ -165,7 +167,7 @@ function drawTimeline() {
 addEventListener('resize', drawTimeline);
 
 $('copy').onclick = async () => {
-  const out = { ua: navigator.userAgent, file: { name: file.name, size: file.size }, info, method: result.method, diag: result.diag, stats: result.stats,
+  const out = { ver: VER, ua: navigator.userAgent, file: { name: file.name, size: file.size }, info, method: result.method, diag: result.diag, stats: result.stats,
                 frames: result.frames, segs: result.segs.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]) };
   const txt = JSON.stringify(out);
   try { await navigator.clipboard.writeText(txt); $('copied').textContent = 'コピーしました'; }

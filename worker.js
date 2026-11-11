@@ -1,5 +1,5 @@
 // デマックス(mp4box.js) → デコード(WebCodecs) → 縮小・ROI読み出し(OffscreenCanvas) → 検出(detect.js)
-importScripts('vendor/mp4box.all.min.js', 'detect.js');
+importScripts('vendor/mp4box.all.min.js', 'detect.js' + self.location.search); // ?v= を引き継いでキャッシュ回避
 const { PARAMS, Detector, track, segment, yuvToRgba } = self.RallyDetect;
 const BASE_W = 640;
 const MAX_FRAMES = 8; // 同時に保持するフレーム数（読み出しの並行数）
