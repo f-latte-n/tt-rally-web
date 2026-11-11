@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ファイル再オープン確認</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --sub:#666; --acc:#0a66c2; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --sub:#999; --acc:#5aa9ff; } }
+  body { margin: 0 auto; padding: 16px; max-width: 640px; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, system-ui, sans-serif; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--acc); background: var(--acc); color: #fff; margin: 6px 0; }
+  .muted { color: var(--sub); font-size: 14px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<h1 style="font-size:18px">ファイル再オープンの確認</h1>
+<p class="muted">動画を1つ選ぶ → ページを閉じる（またはリロード） → もう一度開いて「前回のファイルを開く」を押す。</p>
+<ul id="support"></ul>
+<button id="pick">動画を選ぶ（ハンドル保存）</button>
+<div id="last"></div>
+<p id="log"></p>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (t) => { $('log').textContent = t; };
+const has = (k) => k in window;
+$('support').innerHTML = [
+  ['showOpenFilePicker（ハンドルで選ぶ）', has('showOpenFilePicker')],
+  ['OPFS（アプリ内保存）', !!(navigator.storage && navigator.storage.getDirectory)],
+  ['storage.persist（消されにくくする）', !!(navigator.storage && navigator.storage.persist)],
+].map(([k, v]) => `<li>${v ? '✅' : '❌'} ${k}</li>`).join('');
+
+// IndexedDB にハンドルを1つだけ保存
+const db = () => new Promise((ok, ng) => { const r = indexedDB.open('handle-check', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => ng(r.error); });
+const put = async (v) => { const d = await db(); return new Promise((ok, ng) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, 'last'); t.oncomplete = ok; t.onerror = () => ng(t.error); }); };
+const get = async () => { const d = await db(); return new Promise((ok, ng) => { const r = d.transaction('kv').objectStore('kv').get('last'); r.onsuccess = () => ok(r.result); r.onerror = () => ng(r.error); }); };
+
+$('pick').onclick = async () => {
+  if (!has('showOpenFilePicker')) { log('この端末のブラウザは showOpenFilePicker に未対応です（＝パス保存は不可）'); return; }
+  try {
+    const [h] = await showOpenFilePicker({ types: [{ description: '動画', accept: { 'video/*': ['.mp4', '.mov', '.m4v'] } }] });
+    const f = await h.getFile();
+    await put(h);
+    log(`保存しました：${f.name}（${(f.size / 1e6).toFixed(0)} MB）。ページを閉じてから開き直してください。`);
+    showLast();
+  } catch (e) { log('エラー：' + e.message); }
+};
+
+async function showLast() {
+  let h; try { h = await get(); } catch (e) { log('IndexedDBエラー：' + e.message); return; }
+  if (!h) { $('last').innerHTML = ''; return; }
+  $('last').innerHTML = `<button id="reopen">前回のファイルを開く：${h.name}</button>`;
+  $('reopen').onclick = async () => {
+    try {
+      let p = await h.queryPermission({ mode: 'read' });
+      if (p !== 'granted') p = await h.requestPermission({ mode: 'read' });
+      if (p !== 'granted') { log('許可されませんでした：' + p); return; }
+      const f = await h.getFile();
+      const head = new Uint8Array(await f.slice(0, 16).arrayBuffer());
+      log(`✅ 開けました：${f.name}（${(f.size / 1e6).toFixed(0)} MB、先頭 ${[...head.slice(4, 8)].map((c) => String.fromCharCode(c)).join('')}）`);
+    } catch (e) { log('❌ 開けませんでした：' + e.name + ' ' + e.message); }
+  };
+}
+showLast();
+</script>
+</body>
+</html>
