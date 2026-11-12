@@ -1,36 +1,18 @@
-// デマックス(mp4box.js) → デコード(WebCodecs) → 縮小・ROI読み出し(OffscreenCanvas) → 検出(detect.js)
-importScripts('vendor/mp4box.all.min.js', 'detect.js' + self.location.search); // ?v= を引き継いでキャッシュ回避
+// 読み出し(source.js) → デマックス(mp4box.js) → デコード(WebCodecs) → 縮小・ROI読み出し(OffscreenCanvas) → 検出(detect.js)
+importScripts('vendor/mp4box.all.min.js', 'detect.js' + self.location.search, 'source.js' + self.location.search); // ?v= を引き継いでキャッシュ回避
 const { PARAMS, Detector, track, segment, yuvToRgba, unexpandRange } = self.RallyDetect;
 const BASE_W = 640;
 const MAX_FRAMES = 8; // 同時に保持するフレーム数（読み出しの並行数）
 
 self.onmessage = (e) => {
-  if (e.data.type === 'start') run(e.data.file, e.data.opts).catch((err) => post({ type: 'error', message: String(err && err.message || err) }));
+  // file：File（Web） / src：{url, size, name}（アプリ。Range 対応の読み出し口）
+  const d = e.data, file = d.src ? rangeFile(d.src.url, d.src.size, d.src.name) : d.file;
+  if (d.type === 'start') run(file, d.opts).catch((err) => post({ type: 'error', message: String(err && err.message || err) }));
 };
 const post = (m, tr) => self.postMessage(m, tr || []);
 const now = () => performance.now();
 
-// トップレベルのboxを走査して ftyp と moov だけ読み、連結して mp4box に渡す（mdatは読まない）
-async function readMoov(file) {
-  let pos = 0; const parts = [];
-  while (pos + 8 <= file.size) {
-    const h = new DataView(await file.slice(pos, pos + 16).arrayBuffer());
-    let size = h.getUint32(0);
-    const type = String.fromCharCode(h.getUint8(4), h.getUint8(5), h.getUint8(6), h.getUint8(7));
-    if (size === 1) size = Number(h.getBigUint64(8));
-    else if (size === 0) size = file.size - pos;
-    if (size < 8) break;
-    if (type === 'ftyp' || type === 'moov') parts.push(new Uint8Array(await file.slice(pos, pos + size).arrayBuffer()));
-    if (type === 'moov') {
-      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-      let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
-      out.buffer.fileStart = 0;
-      return out.buffer;
-    }
-    pos += size;
-  }
-  throw new Error('moov が見つかりません（MP4/MOV以外？）');
-}
+const { readMoov, rangeFile } = self.RallySource;
 
 async function openTrack(file) {
   const buf = await readMoov(file);
