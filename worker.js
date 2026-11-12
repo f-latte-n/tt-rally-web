@@ -48,7 +48,11 @@ async function run(file, opts) {
 
   const config = { codec: vt.codec, codedWidth: vt.video.width, codedHeight: vt.video.height, description };
   if (opts.hw) config.hardwareAcceleration = opts.hw;
-  const sup = await VideoDecoder.isConfigSupported(config);
+  let sup = await VideoDecoder.isConfigSupported(config);
+  if (!sup.supported && opts.hw) { // 指定したデコード方式で扱えない（例：SWでHEVC）→ 既定に戻す
+    delete config.hardwareAcceleration;
+    sup = await VideoDecoder.isConfigSupported(config);
+  }
   if (!sup.supported) throw new Error('このブラウザでデコードできません: ' + vt.codec);
 
   const duration = vt.movie_duration / vt.movie_timescale || vt.duration / vt.timescale;
