@@ -159,13 +159,26 @@
     try { await (await opfsDir()).removeEntry(clip.name); } catch (e) { /* もう無い */ }
   }
 
-  // ---------- 書き出し（有償）
-  // アプリ：カメラロールへ（ネイティブ側は未実装）。Web：ダウンロード
+  // ---------- 書き出し
+  // Web：スマホ（iPhone・Android）は共有シート（iPhone は「ビデオを保存」で写真へ）、PC はダウンロード。
+  // アプリ：カメラロールへ（ネイティブ側は未実装）。
+  // 共有シートはタップの直後にしか開けない（iPhone）。そこで exportClip は動画を作るだけにして、
+  // 共有シートは「写真に保存」ボタンのタップで shareClip を呼んで開く。
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   async function exportClip(name, plan, file) {
     if (native) throw new Error('カメラロールへの書き出しは準備中です');
-    const blob = new Blob([plan.header, ...plan.ranges.map(([o, l]) => file.slice(o, o + l))], { type: 'video/mp4' });
+    // 元ファイルの範囲を参照するだけ（メモリに読み込まない）
+    const out = new File([plan.header, ...plan.ranges.map(([o, l]) => file.slice(o, o + l))], name, { type: 'video/mp4' });
+    let share = false;
+    try { share = (isIOS || isAndroid) && !!navigator.canShare && navigator.canShare({ files: [out] }); } catch (e) { /* 共有できない */ }
+    if (share) return { file: out, share: true };
+    downloadClip(out);
+    return { file: out, share: false };
+  }
+  function shareClip(f) { return navigator.share({ files: [f] }); } // タップの処理の中で、await より前に呼ぶ
+  function downloadClip(f) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = name;
+    a.href = URL.createObjectURL(f); a.download = f.name;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
@@ -184,11 +197,11 @@
   }
 
   self.RallyPlatform = {
-    native, platform, isAndroid,
+    native, platform, isAndroid, isIOS,
     // Android は SW デコードが速くて正確（CLAUDE.md）。SW で扱えない形式は worker.js が既定に戻す
     decodeHw: isAndroid ? 'prefer-software' : '',
     canExport: !native,
     pickVideo, reopen, isCancel,
-    writeClip, clipUrl, clipFile, deleteClip, exportClip, persistStorage,
+    writeClip, clipUrl, clipFile, deleteClip, exportClip, shareClip, downloadClip, persistStorage,
   };
 })();

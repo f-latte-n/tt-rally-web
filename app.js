@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.2.0';
+const VER = '0.2.1';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -818,7 +818,7 @@ const SHEETS = {
   },
   export(sh, m) {
     const rs = sorted(m), stars = rs.filter((r) => r.star);
-    const dest = P.native ? 'カメラロール' : 'この端末';
+    const dest = P.native ? 'カメラロール' : (P.isIOS || P.isAndroid ? '写真' : 'この端末');
     if (sh.stage === 'choose') {
       const opt = (k, label, list, dis) => `<button class="opt ${sh.scope === k ? 'on' : ''}" data-a="scope" data-v="${k}" ${dis ? 'disabled style="opacity:.45"' : ''}><span class="rd"></span><b style="flex:1;font-size:16px">${label}</b><span class="h muted" style="font-size:16px">${list.length}本 · ${jlen(totalLen(list))}</span></button>`;
       return `<div style="display:flex;flex-direction:column;gap:6px"><span class="t">${dest}に書き出し</span><span class="d">選んだラリーを1本の動画にまとめます。</span></div>
@@ -826,8 +826,17 @@ const SHEETS = {
        <button class="btn-p bp" style="height:54px;font-size:19px" data-a="expGo">${CORNERS}書き出す</button>`;
     }
     if (sh.stage === 'progress') return progHtml('書き出しています…', sh);
+    if (sh.stage === 'ready') {
+      const how = P.isIOS ? '出てきたメニューで「ビデオを保存」を選ぶと、写真アプリに入ります。LINE などに直接送ることもできます。'
+        : 'メニューから、Googleフォトや LINE などを選べます。端末の中に残すなら「ダウンロード」を押してください。';
+      return `<div style="display:flex;flex-direction:column;gap:6px"><span class="t">動画ができました</span><span class="d">${how}</span><span class="d">大きさ：${MBf(sh.file.size)}</span></div>
+       ${sh.error ? `<span class="err">${esc(sh.error)}</span>` : ''}
+       <button class="btn-p bp" style="height:54px;font-size:19px" data-a="expShare">${CORNERS}${I.up(22)}写真に保存</button>
+       <button class="btn-t ink" style="align-self:center" data-a="expDl">ダウンロード</button>`;
+    }
+    if (sh.stage === 'shared') return doneHtml('書き出しました', P.isIOS ? '「ビデオを保存」を選んだ場合は、写真アプリに入っています。' : '選んだアプリに渡しました。');
     if (sh.stage === 'error') return `<span class="t">書き出せませんでした</span><span class="err">${esc(sh.error)}</span><button class="btn-s" style="height:52px" data-a="closeSheet">閉じる</button>`;
-    return P.native ? doneHtml('カメラロールに保存しました', '写真アプリから、LINE などで送れます。') : doneHtml('書き出しました', 'ダウンロードしたファイルを、写真アプリや LINE で使えます。');
+    return P.native ? doneHtml('カメラロールに保存しました', '写真アプリから、LINE などで送れます。') : doneHtml('書き出しました', P.isIOS ? 'ファイルアプリの「ダウンロード」に入っています。' : 'ダウンロードしたファイルを、写真アプリや LINE で使えます。');
   },
   info(sh, m) {
     return `<span class="t">試合の情報</span>
@@ -1179,6 +1188,17 @@ A.exp = () => {
   S.sheet = { type: 'export', stage: 'choose', scope: m.rallies.some((r) => r.star) ? 'star' : 'all', prog: 0 }; render();
 };
 A.scope = (d) => { S.sheet.scope = d.v; render(); };
+// 共有シートはタップの直後にしか開けないので、await より前に呼ぶ
+A.expShare = () => {
+  const sh = S.sheet; if (!sh || !sh.file) return;
+  sh.error = '';
+  P.shareClip(sh.file).then(() => { if (S.sheet === sh) { sh.stage = 'shared'; render(); } }).catch((e) => {
+    if (e && e.name === 'AbortError') return; // メニューを閉じただけ
+    diag('共有: ' + errMsg(e));
+    if (S.sheet === sh) { sh.error = '共有できませんでした（' + errMsg(e) + '）。「ダウンロード」を試してください。'; render(); }
+  });
+};
+A.expDl = () => { const sh = S.sheet; if (!sh || !sh.file) return; P.downloadClip(sh.file); sh.stage = 'done'; render(); };
 A.expGo = async () => {
   const m = cur(), sh = S.sheet;
   sh.stage = 'progress'; sh.prog = 0; render();
@@ -1193,8 +1213,9 @@ A.expGo = async () => {
     const plan = self.RallyRemux.planClip(await self.RallySource.readMoov(file), segs);
     sh.prog = 0.5; updSheetProg();
     const name = `${m.opp ? 'vs_' + m.opp.replace(/[\\/:*?"<>|\s]+/g, '_') + '_' : ''}${m.date}${sh.scope === 'star' ? '_star' : ''}.mp4`;
-    await P.exportClip(name, plan, file);
-    sh.stage = 'done'; sh.prog = 1;
+    const r = await P.exportClip(name, plan, file);
+    sh.prog = 1;
+    if (r.share) { sh.stage = 'ready'; sh.file = r.file; } else sh.stage = 'done';
   } catch (e) { sh.stage = 'error'; sh.error = errMsg(e); }
   render();
 };
