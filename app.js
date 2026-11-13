@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.5';
+const VER = '0.1.6';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -57,7 +57,7 @@ const S = {
   add: null, an: null, pl: null, adj: null,
 };
 // 実行中だけの情報：開いた元動画（試合ID → {file,url,source} / null=見つからない / {needsPermission}）、サムネイルの URL
-const L = { open: {}, thumbs: {}, tReq: new Set(), scroll: {} };
+const L = { open: {}, thumbs: {}, tReq: new Set(), scroll: {}, noSave: new Set() }; // noSave: 「保存しない」を選んだ試合（このページを開いている間）
 const root = document.getElementById('app');
 const scr = () => S.stack[S.stack.length - 1];
 const cur = () => S.matches.find((m) => m.id === S.cur) || null;
@@ -160,11 +160,20 @@ function softRender() {
 
 // ---------- シート・ダイアログの上では、縦に引っぱってもブラウザが再読み込みしないようにする
 // （中身がスクロールできるときだけ、そのスクロールは通す）
-let touchY = 0;
-root.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+// それ以外の画面でも、いちばん上で下に引っぱったとき（＝引っぱって再読み込み）は止める。
+// iPhone では再読み込みすると元動画を選び直すことになり、beforeunload の確認も出ないため。
+let touchY = 0, touchX = 0;
+root.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; touchX = e.touches[0].clientX; }, { passive: true });
 root.addEventListener('touchmove', (e) => {
-  if (!e.target.closest('.sheet-w, .dlg-w')) return;
-  const dy = e.touches[0].clientY - touchY;
+  const dy = e.touches[0].clientY - touchY, dx = e.touches[0].clientX - touchX;
+  if (!e.target.closest('.sheet-w, .dlg-w')) {
+    if (dy <= 0 || Math.abs(dx) > dy) return; // 下向きの縦の動きだけ
+    for (let el = e.target; el && el !== root; el = el.parentElement) {
+      if (el.scrollTop > 0 && /auto|scroll/.test(getComputedStyle(el).overflowY)) return; // 中身を上へ戻すスクロールは通す
+    }
+    if (e.cancelable) e.preventDefault();
+    return;
+  }
   for (let el = e.target; el && !el.classList.contains('sheet-w') && !el.classList.contains('dlg-w'); el = el.parentElement) {
     if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
       if ((dy > 0 && el.scrollTop > 0) || (dy < 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1)) return;
@@ -173,6 +182,27 @@ root.addEventListener('touchmove', (e) => {
   }
   if (e.cancelable) e.preventDefault();
 }, { passive: false });
+
+// ---------- 保存せずに離れようとしたら、保存を促す
+// iPhone など、元動画を選び直さないと開き直せない（ファイルのハンドルを持てない）とき
+function needsSave(m) {
+  return !!m && status(m) === 'unsaved' && m.rallies.length > 0 && m.source && m.source.kind === 'file' && !L.noSave.has(m.id);
+}
+function askSave(m, proceed) {
+  if (!needsSave(m)) return false;
+  S.dialog = {
+    title: 'ラリー動画を保存しますか？',
+    body: '保存しないと、ページを開き直したときに元の動画を選び直す必要があります。保存しておくと、元の動画がなくても見られます。',
+    ok: '保存する', pri: true, onOk: () => A.save(),
+    no: '保存しない', onNo: () => { L.noSave.add(m.id); proceed(); },
+  };
+  render();
+  return true;
+}
+// 再読み込み・タブを閉じる（PC・Android のブラウザでは確認が出る。iPhone では出ないので、引っぱって再読み込みを止めている）
+addEventListener('beforeunload', (e) => {
+  if (S.matches.some((m) => needsSave(m) && L.open[m.id] && L.open[m.id].url)) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // ---------- 戻る（Android の戻るボタン・Esc）
 function depth() { return S.stack.length - 1 + (S.sheet ? 1 : 0) + (S.dialog ? 1 : 0); }
@@ -191,6 +221,7 @@ function back() {
   if (S.stack.length < 2) return;
   const was = scr();
   if (was === 'analyze') return cancelAnalysis();
+  if (was === 'match' && askSave(cur(), back)) return;
   leave(was); S.stack.pop();
   if (was === 'player' || was === 'adjust') returnToMatch();
   render();
@@ -788,7 +819,7 @@ const SHEETS = {
 function dlgHtml() {
   const d = S.dialog; if (!d) return '';
   return `<div class="dlg-w"><div class="dlg bp">${CORNERS}<span class="h" style="font-size:20px;line-height:1.3">${esc(d.title)}</span><span class="muted" style="font-size:14px;line-height:1.6">${esc(d.body)}</span>
-   <div style="display:grid;grid-template-columns:${d.single ? '1fr' : '1fr 1fr'};gap:8px;margin-top:6px">${d.single ? '' : '<button class="btn-s" data-a="dlgNo">キャンセル</button>'}<button class="${d.single ? 'btn-s' : 'ok'}" data-a="dlgOk">${esc(d.ok)}</button></div></div></div>`;
+   <div style="display:grid;grid-template-columns:${d.single ? '1fr' : '1fr 1fr'};gap:8px;margin-top:6px">${d.single ? '' : `<button class="btn-s" data-a="dlgNo">${esc(d.no || 'キャンセル')}</button>`}<button class="${d.single ? 'btn-s' : 'ok'}${d.pri ? ' pri' : ''}" data-a="dlgOk">${esc(d.ok)}</button></div></div></div>`;
 }
 function ask(title, body, ok, onOk) { S.dialog = { title, body, ok, onOk }; render(); }
 function alertDlg(title, body) { S.dialog = { title, body, ok: '閉じる', single: true, onOk: () => {} }; render(); }
@@ -808,7 +839,7 @@ A.storage = () => go('storage');
 A.privacy = () => go('privacy');
 A.contact = () => toast('お問い合わせ先は準備中です');
 A.closeSheet = () => closeSheet();
-A.dlgNo = () => { S.dialog = null; render(); };
+A.dlgNo = () => { const d = S.dialog; S.dialog = null; if (d && d.onNo) d.onNo(); if (!S.dialog) render(); };
 A.dlgOk = () => { const d = S.dialog; S.dialog = null; d.onOk(); if (!S.dialog) render(); };
 
 // --- 動画を追加 → 台の位置 → 解析
