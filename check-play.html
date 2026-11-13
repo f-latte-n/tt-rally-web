@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>再生の確認</title>
+<style>
+  body { font: 15px/1.5 -apple-system, sans-serif; margin: 12px; }
+  video { width: 100%; background: #000; }
+  button, input { font-size: 16px; margin: 4px 0; }
+  #log { white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<p>アプリを通さず、動画を選んで「飛んで再生」を繰り返すだけのページ。大きな動画で iPhone が落ちる原因が、ブラウザ側かアプリ側かを切り分ける。</p>
+<input type="file" id="f" accept="video/*">
+<video id="v" playsinline muted preload="auto"></video>
+<div>
+  <button id="go">飛んで再生を30回（3秒ずつ）</button>
+  <button id="stop">止める</button>
+</div>
+<div id="log"></div>
+<script>
+'use strict';
+const v = document.getElementById('v'), logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent = new Date().toTimeString().slice(0, 8) + ' ' + s + '\n' + logEl.textContent; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let run = false;
+v.addEventListener('error', () => log('動画のエラー: ' + (v.error && v.error.code)));
+document.getElementById('f').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  v.src = URL.createObjectURL(f);
+  v.onloadedmetadata = () => log(`開いた ${f.name} ${(f.size / 1e9).toFixed(2)}GB ${v.videoWidth}x${v.videoHeight} ${Math.round(v.duration)}秒`);
+};
+document.getElementById('stop').onclick = () => { run = false; v.pause(); };
+document.getElementById('go').onclick = async () => {
+  if (!v.duration) { log('先に動画を選んでください'); return; }
+  run = true;
+  for (let i = 1; i <= 30 && run; i++) {
+    const t = Math.random() * (v.duration - 5);
+    const t0 = performance.now();
+    await new Promise((ok) => { v.addEventListener('seeked', ok, { once: true }); v.currentTime = t; });
+    await v.play().catch((e) => log('再生できません: ' + e.message));
+    log(`${i}回目 ${t.toFixed(1)}秒へ（シーク ${Math.round(performance.now() - t0)}ms）`);
+    await sleep(3000);
+    v.pause();
+  }
+  log(run ? '30回終わりました（落ちなかった）' : '止めました');
+  run = false;
+};
+</script>
+</body>
+</html>

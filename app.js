@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.2.2';
+const VER = '0.2.3';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -479,11 +479,11 @@ SCREENS.match = () => {
   const no = (r) => rs.indexOf(r) + 1, stars = rs.filter((r) => r.star).length;
   const segs = rs.map((r) => {
     const on = selR && r.id === selR.id;
-    return `<div class="sg ${on ? 'on' : inF(r) ? '' : 'off'}" style="left:${r.start / m.dur * 100}%;width:${Math.max(0.5, (r.end - r.start) / m.dur * 100)}%"></div>`;
+    return `<div class="sg ${on ? 'on' : inF(r) ? '' : 'off'}" data-id="${r.id}" style="left:${r.start / m.dur * 100}%;width:${Math.max(0.5, (r.end - r.start) / m.dur * 100)}%"></div>`;
   }).join('');
   const rows = fl.map((r) => {
     const on = selR && r.id === selR.id;
-    return `<div class="row ${on ? 'on' : ''}">
+    return `<div class="row ${on ? 'on' : ''}" data-id="${r.id}">
      <button class="main" data-a="sel" data-id="${r.id}">
       <div class="ph" style="opacity:${missing ? 0.5 : 1}">${thumbHtml(m, r)}<span class="ov" style="left:3px;bottom:2px">${secs(r.end - r.start)}</span></div>
       <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
@@ -506,7 +506,7 @@ SCREENS.match = () => {
    </div>
    <div class="vbox" ${missing ? '' : 'data-vslot'}>
     ${missing ? `<div class="ph" style="position:absolute;inset:0;opacity:.4"></div><div class="vmiss"><span class="h" style="font-size:18px">元動画が見つかりません</span><span style="font-size:12px;color:rgba(255,255,255,.7)">再生するには、動画を選び直してください</span></div>` : `
-    <span class="lbl">${selR ? 'ラリー ' + no(selR) : ''}</span>
+    <span class="lbl" id="mLbl">${selR ? 'ラリー ' + no(selR) : ''}</span>
     <button class="tap" data-a="mpToggle" aria-label="再生"><span class="playdot when-paused">${I.play(26)}</span></button>
     <button class="full" data-a="cont" aria-label="全画面">${I.full}</button>
     <span class="tm" id="vTime"></span>
@@ -1013,7 +1013,12 @@ A.open = async (d) => {
 };
 A.sel = (d) => {
   const m = cur(), r = m.rallies.find((x) => x.id === d.id); if (!r) return;
-  S.sel = r.id; render();
+  S.sel = r.id;
+  // 画面を描き直さず、選択の表示だけ変える（描き直すと再生中の動画を付け替えることになり、大きな動画では iPhone で重い）
+  if (scr() === 'match' && root.querySelector(`.row[data-id="${r.id}"]`)) {
+    root.querySelectorAll('.row[data-id], .sg[data-id]').forEach((el) => el.classList.toggle('on', el.dataset.id === r.id));
+    setText('mLbl', 'ラリー ' + (sorted(m).indexOf(r) + 1));
+  } else render();
   if (status(m) !== 'missing') { const [a, b] = rallySpan(m, r); playSpan(a, b, () => V.pause()); }
 };
 A.mpToggle = () => {
