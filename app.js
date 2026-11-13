@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.11';
+const VER = '0.2.0';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
