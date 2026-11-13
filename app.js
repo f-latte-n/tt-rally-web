@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.2.1';
+const VER = '0.2.2';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -91,6 +91,8 @@ async function mediaUrl(m) {
   const o = L.open[m.id];
   return o && o.url ? o.url : null;
 }
+V.addEventListener('error', () => diag('動画のエラー: ' + (V.error ? V.error.code + ' ' + (V.error.message || '') : '?')));
+V.addEventListener('loadedmetadata', () => diag(`動画を開いた ${V.videoWidth}x${V.videoHeight} ${Math.round(V.duration)}秒`, true));
 function setSrc(url) {
   if (!url) { if (V.getAttribute('src')) { V.removeAttribute('src'); V.load(); } return; }
   if (V.src !== url) { V.src = url; V.load(); }
@@ -103,7 +105,9 @@ async function seek(t) {
   V.currentTime = t;
   await p;
 }
+let playN = 0;
 async function playSpan(a, b, onEnd, from) {
+  diag(`再生 ${++playN}回目 ${a.toFixed(1)}〜${b.toFixed(1)}秒`, true);
   PB.a = a; PB.b = b; PB.onEnd = onEnd;
   PB.seeking++; // シークが終わるまでは「終わりに来た」と判定しない
   try { await seek(from != null ? from : a); } finally { PB.seeking--; }
@@ -303,7 +307,7 @@ function thumbHtml(m, r) {
   const key = m.id + '/' + r.id, u = L.thumbs[key];
   if (u) return `<img src="${u}" alt="">`;
   requestThumb(m, r, key);
-  return '';
+  return `<img data-tk="${esc(key)}" alt="" style="visibility:hidden">`; // できたら、ここだけ差し替える（showThumb）
 }
 SCREENS.home = () => {
   const ms = S.matches;
@@ -858,7 +862,7 @@ const SHEETS = {
 };
 function dlgHtml() {
   const d = S.dialog; if (!d) return '';
-  return `<div class="dlg-w"><div class="dlg bp">${CORNERS}<span class="h" style="font-size:20px;line-height:1.3">${esc(d.title)}</span><span class="muted" style="font-size:14px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere">${esc(d.body)}</span>
+  return `<div class="dlg-w"><div class="dlg bp">${CORNERS}<span class="h" style="font-size:20px;line-height:1.3">${esc(d.title)}</span><span class="muted dlg-b">${esc(d.body)}</span>
    <div style="display:grid;grid-template-columns:${d.single ? '1fr' : '1fr 1fr'};gap:8px;margin-top:6px">${d.single ? '' : `<button class="btn-s" data-a="dlgNo">${esc(d.no || 'キャンセル')}</button>`}<button class="${d.single ? 'btn-s' : 'ok'}${d.pri ? ' pri' : ''}" data-a="dlgOk">${esc(d.ok)}</button></div></div></div>`;
 }
 function ask(title, body, ok, onOk) { S.dialog = { title, body, ok, onOk }; render(); }
@@ -913,8 +917,11 @@ A.a2hsHide = () => { S.a2hsHidden = true; DB.set('a2hsHidden', true); render(); 
 A.diag = async () => {
   let n = '?'; try { n = await DB.countThumbs(); } catch (e) { n = '読めません: ' + errMsg(e); }
   const lines = [`バージョン ${VER}`, navigator.userAgent, `サムネイル：記録 ${n} 枚／表示中 ${Object.keys(L.thumbs).length} 枚`,
-    `試合 ${S.matches.length} 件`, `データの保護：${persistLabel()}`, `ホーム画面から：${standalone() ? 'はい' : 'いいえ'}／SW：${navigator.serviceWorker && navigator.serviceWorker.controller ? '動作中' : 'なし'}`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
-  alertDlg('診断情報', lines.join('\n'));
+    `試合 ${S.matches.length} 件`, `データの保護：${persistLabel()}`, `ホーム画面から：${standalone() ? 'はい' : 'いいえ'}／SW：${navigator.serviceWorker && navigator.serviceWorker.controller ? '動作中' : 'なし'}`, '', '記録（新しいものが下）：', ...(diagLog.length ? diagLog : ['（なし）'])];
+  const text = lines.join('\n');
+  S.dialog = { title: '診断情報', body: text, ok: 'コピー', pri: true, no: '閉じる',
+    onOk: () => { navigator.clipboard.writeText(text).then(() => toast('コピーしました'), () => toast('コピーできませんでした')); } };
+  render();
 };
 A.closeSheet = () => closeSheet();
 A.dlgNo = () => { const d = S.dialog; S.dialog = null; if (d && d.onNo) d.onNo(); if (!S.dialog) render(); };
@@ -1000,6 +1007,7 @@ A.open = async (d) => {
   }
   S.cur = m.id; S.filter = 'all'; S.sel = sorted(m)[0] ? sorted(m)[0].id : null; delete L.scroll.match;
   PB.a = PB.b = -1;
+  diag(`試合を開いた ラリー${m.rallies.length}本 ${m.clip ? '保存済み ' + MBf(m.clip.bytes) : '元動画 ' + (m.source && m.source.size ? MBf(m.source.size) : '?')}`, true);
   await prepMedia(m);
   go('match');
 };
@@ -1245,14 +1253,27 @@ TV.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;p
 document.body.appendChild(TV);
 const tFail = {}; // サムネイルの失敗回数（同じものを何度も試さない。つなぎ直したら数え直す）
 // 診断情報（設定 → 診断情報 で見られる。実機で原因を調べるため）
-const diagLog = [];
-function diag(msg) { diagLog.push(new Date().toTimeString().slice(0, 8) + ' ' + msg); if (diagLog.length > 12) diagLog.shift(); console.warn(msg); }
+// 落ちても残るように localStorage にも書く（次に開いたときに、落ちる直前の様子が見られる）
+const DIAG_KEY = 'rally-diag';
+const diagLog = (() => { try { return JSON.parse(localStorage.getItem(DIAG_KEY)) || []; } catch (e) { return []; } })();
+function diag(msg, quiet) {
+  const d = new Date();
+  diagLog.push(`${d.getMonth() + 1}/${d.getDate()} ${d.toTimeString().slice(0, 8)} ${msg}`);
+  while (diagLog.length > 40) diagLog.shift();
+  try { localStorage.setItem(DIAG_KEY, JSON.stringify(diagLog)); } catch (e) { /* 書けなくてもよい */ }
+  if (!quiet) console.warn(msg);
+}
 const tQ = []; let tBusy = false;
+// できたサムネイルを、画面を描き直さずに差し込む（描き直すと再生中の動画を付け替えることになり、iPhone で重い）
+function showThumb(key, url) {
+  L.thumbs[key] = url;
+  for (const el of root.querySelectorAll('img[data-tk]')) if (el.dataset.tk === key) { el.src = url; el.style.visibility = ''; el.removeAttribute('data-tk'); }
+}
 function requestThumb(m, r, key) {
   if (L.tReq.has(key)) return;
   L.tReq.add(key);
   DB.getThumb(key).then((b) => {
-    if (b) { L.thumbs[key] = URL.createObjectURL(b); softRender(); } else { tQ.push({ m, r, key }); pumpThumbs(); }
+    if (b) showThumb(key, URL.createObjectURL(b)); else { tQ.push({ m, r, key }); pumpThumbs(); }
   }).catch((e) => { diag('サムネイルを読めません: ' + errMsg(e)); tQ.push({ m, r, key }); pumpThumbs(); });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1266,7 +1287,11 @@ function isBlank(g) { // 真っ黒（何も描けていない）か。数点だ�
 }
 async function pumpThumbs() {
   if (tBusy) return; tBusy = true;
+  let made = 0;
+  diag(`サムネイル作成 開始（${tQ.length}枚待ち）`, true);
   while (tQ.length) {
+    // 再生中は作らない（大きな動画を2つ同時に読むと iPhone で重くなる）
+    while (!V.paused && V.isConnected) await sleep(500);
     const j = tQ.shift();
     try {
       if (!S.matches.includes(j.m) || !j.m.rallies.includes(j.r)) continue;
@@ -1293,7 +1318,7 @@ async function pumpThumbs() {
       }
       const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.7));
       if (blob) {
-        L.thumbs[j.key] = URL.createObjectURL(blob); softRender();
+        showThumb(j.key, URL.createObjectURL(blob)); made++;
         await DB.putThumb(j.key, blob).catch((e) => diag('サムネイルを記録できません: ' + errMsg(e)));
       } else diag('サムネイルの画像を作れません');
     } catch (e) {
@@ -1302,11 +1327,16 @@ async function pumpThumbs() {
       if (tFail[j.key] < 3) L.tReq.delete(j.key); // 3回失敗したら、つなぎ直すまで試さない
     }
   }
+  diag(`サムネイル作成 終了（${made}枚）`, true);
+  // 作り終えたら、サムネイル用の動画を手放す（大きな動画をつかんだままにしない）
+  if (TV.getAttribute('src')) { TV.removeAttribute('src'); TV.load(); }
   tBusy = false;
 }
 
 // ---------- 起動
 (async function boot() {
+  diag(`起動 ${VER}${standalone() ? '（ホーム画面から）' : ''}`, true);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) diag('裏に回った', true); });
   try {
     const [ms, onboarded, a2hsHidden] = await Promise.all([DB.allMatches(), DB.get('onboarded'), DB.get('a2hsHidden')]);
     S.matches = (ms || []).sort((a, b) => b.created - a.created);
