@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.2';
+const VER = '0.1.3';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -524,9 +524,9 @@ SCREENS.player = () => {
     <span class="h" style="text-align:center;font-size:24px">${pl.idx + 1} / ${pl.list.length}</span>
     <button class="btn-d" data-a="rotate">横向き</button>
    </div>
-   <div class="grow" style="display:flex;flex-direction:column;justify-content:center;min-height:0">
-    <div class="vbox" data-vslot style="background:#000"><button class="tap" data-a="plToggle" aria-label="再生/一時停止"><span class="playdot when-paused" style="width:64px;height:64px">${I.play(28)}</span></button>${ended}</div>
-    <div style="padding:12px 20px 0;display:flex;flex-direction:column;gap:8px">
+   <div class="grow pl-mid" style="display:flex;flex-direction:column;justify-content:center;min-height:0">
+    <div class="vbox pl-v" data-vslot style="background:#000"><button class="tap" data-a="plToggle" aria-label="再生/一時停止"><span class="playdot when-paused" style="width:64px;height:64px">${I.play(28)}</span></button>${ended}</div>
+    <div style="padding:12px 20px 0;display:flex;flex-direction:column;gap:8px;flex:none">
      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="h" style="font-size:22px">ラリー ${no}</span><span class="h" style="font-size:15px;color:rgba(255,255,255,.7)" id="vTime"></span></div>
      <div class="pbar2"><div id="vBar"></div></div>
      <span style="font-size:12px;color:rgba(255,255,255,.6)">${mmss(r.start)}から · ${secs(len)}</span>
