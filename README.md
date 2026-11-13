@@ -10,7 +10,7 @@
 - WebCodecs は安全なコンテキスト（HTTPS か localhost）でしか動かない。
 
 ```
-python3 -m http.server 8765    # ローカル: http://localhost:8765/ （アプリ本体は /app.html。localhost では購入を試せる）
+python3 -m http.server 8765    # ローカル: http://localhost:8765/ （アプリ本体は /app.html）
 ```
 
 ## 照合

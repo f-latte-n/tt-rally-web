@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.4';
+const VER = '0.1.5';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -46,15 +46,14 @@ const I = {
   down: sv('<path d="M12 15V3M7 10l5 5 5-5M5 21h14"/>', 20),
   up: (w = 20) => sv('<path d="M12 3v12M7 8l5-5 5 5M5 21h14"/>', w),
   info: (w = 20) => sv('<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h0"/>', w),
-  ban: sv('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
 };
 const CORNERS = '<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>';
-const adHtml = () => (CFG.ads && !S.purchased ? '<div class="ad"><b>広告</b><span>バナー 320×50</span></div>' : '');
+const adHtml = () => (CFG.ads ? '<div class="ad"><b>広告</b><span>バナー 320×50</span></div>' : '');
 
 // ---------- 状態
 const S = {
   stack: ['home'], matches: [], cur: null, sel: null, filter: 'all',
-  sheet: null, dialog: null, toast: null, purchased: false, ob: 0,
+  sheet: null, dialog: null, toast: null, ob: 0,
   add: null, an: null, pl: null, adj: null,
 };
 // 実行中だけの情報：開いた元動画（試合ID → {file,url,source} / null=見つからない / {needsPermission}）、サムネイルの URL
@@ -202,7 +201,7 @@ function leave(name) {
 }
 function closeSheet() {
   const sh = S.sheet;
-  if (sh && (sh.stage === 'progress' || sh.stage === 'buying')) return;
+  if (sh && sh.stage === 'progress') return;
   S.sheet = null;
   render();
 }
@@ -694,8 +693,6 @@ SCREENS.settings = () => {
   const total = S.matches.reduce((n, m) => n + (m.clip ? m.clip.bytes : 0), 0);
   return `<div class="scr">${subHead('試合', '設定')}
    <div class="scroll" style="padding:8px 16px 40px;display:flex;flex-direction:column;gap:22px">
-    ${sgroup('購入', `<button class="srow" style="min-height:60px" data-a="buyOpen"><span style="display:flex;flex-direction:column"><span>書き出し＋広告なし</span><span style="font-size:12px" class="muted">買い切り · 一度の購入でずっと使えます</span></span><span class="h" style="color:var(--accent-ink)">${S.purchased ? '購入済み' : '¥160'}</span></button>
-     <button class="srow ink" data-a="restore">購入を復元</button>`)}
     ${sgroup('撮影と保存', `<button class="srow" data-a="tips"><span>撮影のコツ</span><span class="muted">›</span></button>
      <button class="srow" data-a="storage"><span>アプリ内の保存容量</span><span class="muted" style="font-size:14px">${total ? MBf(total) : '0MB'} ›</span></button>
      <button class="srow" data-a="privacy"><span>プライバシー</span><span class="muted">›</span></button>`)}
@@ -720,7 +717,7 @@ SCREENS.storage = () => {
 };
 SCREENS.privacy = () => `<div class="scr">${subHead('設定', 'プライバシー')}
   <div class="scroll" style="padding:0 20px 40px;display:flex;flex-direction:column;gap:18px;font-size:15px;line-height:1.75">
-   ${[['解析は端末の中だけ', 'ラリーを探す処理は、すべてこのスマホの中で行います。動画や画像をサーバーに送ることはありません。'], ['通信なしで使えます', '解析と再生は、機内モードでも動きます。'], ['広告について', '広告は一覧画面と解析中の画面にだけ出ます。広告の仕組みが、動画やその内容に触れることはありません。']]
+   ${[['解析は端末の中だけ', 'ラリーを探す処理は、すべてこのスマホの中で行います。動画や画像をサーバーに送ることはありません。'], ['通信なしで使えます', '解析と再生は、機内モードでも動きます。']].concat(CFG.ads ? [['広告について', '広告は一覧画面と解析中の画面にだけ出ます。広告の仕組みが、動画やその内容に触れることはありません。']] : [])
     .map(([t, d]) => `<div style="display:flex;flex-direction:column;gap:4px"><span class="h" style="font-size:19px">${t}</span><span class="muted">${d}</span></div>`).join('')}
   </div></div>`;
 
@@ -729,7 +726,7 @@ function sheetHtml() {
   const sh = S.sheet; if (!sh) return '';
   const m = cur(), body = SHEETS[sh.type](sh, m);
   // 閉じるのは×ボタン（下に引いて閉じる見た目にすると、ブラウザの「引っぱって再読み込み」を誘ってしまう）
-  const busy = sh.stage === 'progress' || sh.stage === 'buying';
+  const busy = sh.stage === 'progress';
   return `<div class="sheet-w"><div class="scrim" data-a="closeSheet"></div><div class="sheet">${busy ? '' : `<button class="shx" data-a="closeSheet" aria-label="閉じる">${I.x}</button>`}${body}</div></div>`;
 }
 const doneHtml = (title, sub, btn) => `<div class="cblk" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0 4px;text-align:center"><span class="done-ic">${I.check(30)}</span><span class="t">${title}</span><span class="d">${sub}</span></div>
@@ -756,16 +753,6 @@ const SHEETS = {
     if (sh.stage === 'error') return `<span class="t">保存できませんでした</span><span class="err">${esc(sh.error)}</span><button class="btn-s" style="height:52px" data-a="closeSheet">閉じる</button>`;
     return `<div style="display:flex;flex-direction:column;gap:6px"><span class="t">保存済みです</span><span class="d">この試合のラリー動画（${MBf(m.clip.bytes)}）をアプリ内に保存しています。元の動画を消しても見られます。ラリーの調整はできません。</span></div>
      <button class="btn-p bp" data-a="closeSheet">${CORNERS}閉じる</button>`;
-  },
-  purchase(sh) {
-    return `<div style="display:flex;flex-direction:column;gap:4px"><span class="kicker">買い切り</span><span class="h" style="font-size:28px">書き出し＋広告なし</span></div>
-     <div class="list-l">
-      <div><span style="color:var(--accent)">${I.up(22)}</span><div style="display:flex;flex-direction:column"><b style="font-size:15px">ラリー集をカメラロールに書き出し</b><span style="font-size:13px" class="muted">★のラリーを1本の動画にして、LINE などで送れます</span></div></div>
-      <div><span style="color:var(--accent)">${I.ban}</span><div style="display:flex;flex-direction:column"><b style="font-size:15px">広告が消えます</b><span style="font-size:13px" class="muted">一覧画面と解析中の広告がなくなります</span></div></div>
-     </div>
-     <div style="display:flex;align-items:baseline;gap:10px"><span class="h" style="font-size:44px;line-height:1">¥160</span><span style="font-size:13px" class="muted">一度の購入で、ずっと使えます</span></div>
-     <button class="btn-p bp" style="height:54px;font-size:19px" data-a="buy" ${sh.stage === 'buying' ? 'disabled' : ''}>${CORNERS}${sh.stage === 'buying' ? '購入しています…' : '¥160で購入する'}</button>
-     <button class="btn-t ink" style="align-self:center;margin-top:-6px" data-a="restore" ${sh.stage === 'buying' ? 'disabled' : ''}>購入を復元</button>`;
   },
   export(sh, m) {
     const rs = sorted(m), stars = rs.filter((r) => r.star);
@@ -1083,11 +1070,10 @@ A.clipDel = (d) => {
   });
 };
 
-// --- 書き出し（有償）・購入
+// --- 書き出し
 A.exp = () => {
   const m = cur(); if (status(m) === 'missing') return;
   V.pause();
-  if (!S.purchased) { S.sheet = { type: 'purchase', stage: 'choose', then: 'export' }; render(); return; }
   S.sheet = { type: 'export', stage: 'choose', scope: m.rallies.some((r) => r.star) ? 'star' : 'all', prog: 0 }; render();
 };
 A.scope = (d) => { S.sheet.scope = d.v; render(); };
@@ -1110,19 +1096,6 @@ A.expGo = async () => {
   } catch (e) { sh.stage = 'error'; sh.error = errMsg(e); }
   render();
 };
-A.buyOpen = () => { if (S.purchased) return; S.sheet = { type: 'purchase', stage: 'choose' }; render(); };
-async function doBuy(restore) {
-  const sh = S.sheet || (S.sheet = { type: 'purchase', stage: 'choose' });
-  sh.stage = 'buying'; render();
-  const r = restore ? await P.restorePurchase() : await P.purchase();
-  if (!r.ok) { sh.stage = 'choose'; render(); toast(r.message); return; }
-  S.purchased = true; DB.set('purchased', true);
-  const m = cur();
-  S.sheet = sh.then === 'export' && m ? { type: 'export', stage: 'choose', scope: m.rallies.some((x) => x.star) ? 'star' : 'all', prog: 0 } : null;
-  render(); toast(restore ? '購入を復元しました' : '購入しました。広告は表示されません');
-}
-A.buy = () => doBuy(false);
-A.restore = () => doBuy(true);
 
 // ---------- イベント（すべて委譲）
 root.addEventListener('click', (e) => {
@@ -1197,9 +1170,8 @@ async function pumpThumbs() {
 // ---------- 起動
 (async function boot() {
   try {
-    const [ms, onboarded, purchased] = await Promise.all([DB.allMatches(), DB.get('onboarded'), DB.get('purchased')]);
+    const [ms, onboarded] = await Promise.all([DB.allMatches(), DB.get('onboarded')]);
     S.matches = (ms || []).sort((a, b) => b.created - a.created);
-    S.purchased = !!purchased;
     if (!onboarded) S.stack = ['onboard'];
   } catch (e) {
     alertDlg('データを読めませんでした', errMsg(e));

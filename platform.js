@@ -170,18 +170,6 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
 
-  // ---------- 購入（App Store / Google Play 課金は未実装）
-  // 開発中（localhost）だけ、書き出しを試せるように購入済みにできる
-  const devUnlock = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-  async function purchase() {
-    if (devUnlock) return { ok: true };
-    return { ok: false, message: '購入はまだ準備中です' };
-  }
-  async function restorePurchase() {
-    if (devUnlock) return { ok: true };
-    return { ok: false, message: '購入の復元はまだ準備中です' };
-  }
-
   self.RallyPlatform = {
     native, platform, isAndroid,
     // Android は SW デコードが速くて正確（CLAUDE.md）。SW で扱えない形式は worker.js が既定に戻す
@@ -189,6 +177,5 @@
     canExport: !native,
     pickVideo, reopen, isCancel,
     writeClip, clipUrl, clipFile, deleteClip, exportClip,
-    purchase, restorePurchase,
   };
 })();
