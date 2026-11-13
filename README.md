@@ -6,6 +6,8 @@
 
 - `app.html` アプリ本体（Claude Design「画面デザイン」v0.1 の実装）。`app.js` 画面と操作 / `app.css` トークンと部品 /
   `platform.js` 動画の取得元・保存先（Web と アプリの差し替え層） / `store.js` IndexedDB / `opfs-write.js` Web版の保存
+- PWA：`manifest.webmanifest`・`icons/`・`sw.js`（アプリ本体を端末にしまい、通信なしで開けるようにする）。
+  `sw.js` の版は登録時の `?v=`（app.js の VER）。版を上げると古いしまい場所は消える。ファイルを増やしたら `sw.js` の FILES にも足す。
 - `index.html` 速度計測ページ / `worker.js` デマックス→デコード→ROI読み出し / `detect.js` 検出コア
 - WebCodecs は安全なコンテキスト（HTTPS か localhost）でしか動かない。
 

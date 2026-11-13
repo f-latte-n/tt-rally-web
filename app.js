@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.8';
+const VER = '0.1.9';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -55,6 +55,7 @@ const S = {
   stack: ['home'], matches: [], cur: null, sel: null, filter: 'all',
   sheet: null, dialog: null, toast: null, ob: 0,
   add: null, an: null, pl: null, adj: null,
+  a2hsHidden: false, // ホーム画面の「ホーム画面に追加」の案内を×で閉じた
 };
 // 実行中だけの情報：開いた元動画（試合ID → {file,url,source} / null=見つからない / {needsPermission}）、サムネイルの URL
 const L = { open: {}, thumbs: {}, tReq: new Set(), scroll: {}, noSave: new Set() }; // noSave: 「保存しない」を選んだ試合（このページを開いている間）
@@ -284,6 +285,16 @@ function obScreen(tips) {
 SCREENS.onboard = () => obScreen(false);
 SCREENS.tips = () => obScreen(true);
 
+// ---------- ホーム画面に追加（PWA）
+// iPhone はブラウザから追加できる仕組みがないので、手順を案内する。Android・PC の Chrome は beforeinstallprompt で追加できる。
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let installEvt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (['home', 'settings'].includes(scr())) render(); });
+addEventListener('appinstalled', () => { installEvt = null; if (['home', 'settings'].includes(scr())) render(); });
+const canInstall = () => !P.native && !standalone() && (IOS || !!installEvt);
+const a2hsBar = () => (canInstall() && !S.a2hsHidden ? `<div class="savebar a2hs"><div style="flex:1;display:flex;flex-direction:column;gap:2px"><b>ホーム画面に追加</b><span>保存した動画が消えにくくなり、通信がなくても開けます。</span></div><button data-a="install">${IOS ? '方法を見る' : '追加する'}</button><button class="ico" data-a="a2hsHide" aria-label="閉じる">${I.x}</button></div>` : '');
+
 // ---------- ホーム
 function thumbHtml(m, r) {
   if (!r) return '';
@@ -313,6 +324,7 @@ SCREENS.home = () => {
   return `<div class="scr">
    <div class="none" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px 0 20px"><span class="appname">（アプリ名）</span><button class="ico" data-a="settings" aria-label="設定">${I.set}</button></div>
    <div class="bigttl">試合</div>
+   ${a2hsBar()}
    ${ms.length ? `<div class="scroll" data-sk="home" style="padding:8px 20px 20px;display:flex;flex-direction:column;gap:20px">${cards}</div>` : `
    <div class="grow" style="display:flex;flex-direction:column;justify-content:center;padding:0 28px 24px;gap:18px">
     <div class="bp frame illus" style="aspect-ratio:16/10">${CORNERS}<span>イラスト：試合動画 → ラリーだけ</span></div>
@@ -726,6 +738,7 @@ SCREENS.settings = () => {
   const total = S.matches.reduce((n, m) => n + (m.clip ? m.clip.bytes : 0), 0);
   return `<div class="scr">${subHead('試合', '設定')}
    <div class="scroll" style="padding:8px 16px 40px;display:flex;flex-direction:column;gap:22px">
+    ${canInstall() ? sgroup('使いはじめに', '<button class="srow" data-a="install"><span>ホーム画面に追加</span><span class="muted">›</span></button>') : ''}
     ${sgroup('撮影と保存', `<button class="srow" data-a="tips"><span>撮影のコツ</span><span class="muted">›</span></button>
      <button class="srow" data-a="storage"><span>アプリ内の保存容量</span><span class="muted" style="font-size:14px">${total ? MBf(total) : '0MB'} ›</span></button>
      <button class="srow" data-a="privacy"><span>プライバシー</span><span class="muted">›</span></button>`)}
@@ -746,7 +759,7 @@ SCREENS.storage = () => {
       <span class="h" style="width:60px;text-align:right">${MBf(m.clip.bytes)}</span>
       <button class="btn-s" style="height:44px;padding:0 10px;color:var(--danger);font:700 13px var(--font)" data-a="clipDel" data-id="${m.id}">削除</button></div>`).join('')}</div>
     <span style="font-size:12px;line-height:1.6" class="muted">削除しても、ラリーの位置と★・コメントは残ります。元の動画があれば、また再生できます。</span>
-    ${P.native ? '' : '<span style="font-size:12px;line-height:1.6" class="muted">ブラウザ版では、ブラウザがこの保存を消すことがあります。大切な動画はアプリ版で保存してください。</span>'}
+    ${P.native ? '' : `<span style="font-size:12px;line-height:1.6" class="muted">ブラウザ版では、ブラウザがこの保存を消すことがあります。${standalone() ? '' : 'ホーム画面に追加して使うと、消えにくくなります。'}大切な動画は「書き出し」で端末にも残してください。</span>`}
    </div></div>`;
 };
 SCREENS.privacy = () => `<div class="scr">${subHead('設定', 'プライバシー')}
@@ -770,6 +783,17 @@ const progHtml = (title, sh, extra) => `<span class="t">${title}</span>
   <div class="bar6"><div id="shBar" style="width:${sh.prog * 100}%"></div></div>`;
 const totalLen = (rs) => rs.reduce((n, r) => n + r.end - r.start, 0);
 const SHEETS = {
+  a2hs() {
+    const li = (n, t) => `<div style="display:flex;gap:12px"><span class="h" style="flex:none;width:22px;font-size:20px;line-height:1.3;color:var(--accent)">${n}</span><span style="font-size:15px;line-height:1.6">${t}</span></div>`;
+    return `<div style="display:flex;flex-direction:column;gap:6px"><span class="t">ホーム画面に追加</span><span class="d">ホーム画面のアイコンから開くと、アプリのように使えます。保存した動画が消えにくくなり、通信がなくても開けます。</span></div>
+     <div style="display:flex;flex-direction:column;gap:12px">
+      ${li(1, 'Safari：画面下の「…」→「共有」をタップ（□に↑の共有ボタンが見えていれば、それをタップ）。<br>Chrome：アドレスバーの右の共有ボタンをタップ。')}
+      ${li(2, '「ホーム画面に追加」を選ぶ（見当たらなければ、下にスクロールするか「さらに表示」）。')}
+      ${li(3, '「追加」をタップ。次からはホーム画面の「ラリー」から開きます。')}
+     </div>
+     <div class="warnbox">${I.info(20)}<div style="display:flex;flex-direction:column;gap:2px"><b>ここで保存した試合は引き継がれません</b><span>ホーム画面から開いたアプリは、ブラウザとは別の場所に保存します。先に追加してから、動画を解析・保存してください。</span></div></div>
+     <button class="btn-s" style="height:52px;font-size:18px" data-a="closeSheet">閉じる</button>`;
+  },
   save(sh, m) {
     const rs = sorted(m);
     if (sh.stage === 'choose') {
@@ -841,10 +865,17 @@ A.settings = () => go('settings');
 A.storage = () => go('storage');
 A.privacy = () => go('privacy');
 A.contact = () => toast('お問い合わせ先は準備中です');
+A.install = async () => {
+  if (!installEvt) { S.sheet = { type: 'a2hs' }; render(); return; }
+  const e = installEvt; installEvt = null;
+  try { await e.prompt(); await e.userChoice; } catch (err) { diag('ホーム画面に追加: ' + errMsg(err)); }
+  render();
+};
+A.a2hsHide = () => { S.a2hsHidden = true; DB.set('a2hsHidden', true); render(); toast('設定からいつでも追加できます'); };
 A.diag = async () => {
   let n = '?'; try { n = await DB.countThumbs(); } catch (e) { n = '読めません: ' + errMsg(e); }
   const lines = [`バージョン ${VER}`, navigator.userAgent, `サムネイル：記録 ${n} 枚／表示中 ${Object.keys(L.thumbs).length} 枚`,
-    `試合 ${S.matches.length} 件`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
+    `試合 ${S.matches.length} 件`, `ホーム画面から：${standalone() ? 'はい' : 'いいえ'}／SW：${navigator.serviceWorker && navigator.serviceWorker.controller ? '動作中' : 'なし'}`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
   alertDlg('診断情報', lines.join('\n'));
 };
 A.closeSheet = () => closeSheet();
@@ -1226,14 +1257,19 @@ async function pumpThumbs() {
 // ---------- 起動
 (async function boot() {
   try {
-    const [ms, onboarded] = await Promise.all([DB.allMatches(), DB.get('onboarded')]);
+    const [ms, onboarded, a2hsHidden] = await Promise.all([DB.allMatches(), DB.get('onboarded'), DB.get('a2hsHidden')]);
     S.matches = (ms || []).sort((a, b) => b.created - a.created);
+    S.a2hsHidden = !!a2hsHidden;
     if (!onboarded) S.stack = ['onboard'];
   } catch (e) {
     alertDlg('データを読めませんでした', errMsg(e));
   }
   render();
   requestAnimationFrame(tickLoop);
+  // 通信なしで開けるように、アプリ本体を端末にしまう（sw.js）。アプリ版（Capacitor）では使わない
+  if ('serviceWorker' in navigator && !P.native && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js?v=' + VER).catch((e) => diag('Service Worker: ' + errMsg(e)));
+  }
   // 未保存の試合の元動画が、まだ開けるか確かめる（開けなければ「元動画なし」）
   for (const m of S.matches) {
     if (m.clip) continue;
