@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.3';
+const VER = '0.1.4';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -158,6 +158,22 @@ function softRender() {
     if (['home', 'match'].includes(scr())) render();
   }, 120);
 }
+
+// ---------- シート・ダイアログの上では、縦に引っぱってもブラウザが再読み込みしないようにする
+// （中身がスクロールできるときだけ、そのスクロールは通す）
+let touchY = 0;
+root.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+root.addEventListener('touchmove', (e) => {
+  if (!e.target.closest('.sheet-w, .dlg-w')) return;
+  const dy = e.touches[0].clientY - touchY;
+  for (let el = e.target; el && !el.classList.contains('sheet-w') && !el.classList.contains('dlg-w'); el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
+      if ((dy > 0 && el.scrollTop > 0) || (dy < 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1)) return;
+      break;
+    }
+  }
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
 
 // ---------- 戻る（Android の戻るボタン・Esc）
 function depth() { return S.stack.length - 1 + (S.sheet ? 1 : 0) + (S.dialog ? 1 : 0); }
@@ -712,9 +728,11 @@ SCREENS.privacy = () => `<div class="scr">${subHead('設定', 'プライバシ�
 function sheetHtml() {
   const sh = S.sheet; if (!sh) return '';
   const m = cur(), body = SHEETS[sh.type](sh, m);
-  return `<div class="sheet-w"><div class="scrim" data-a="closeSheet"></div><div class="sheet"><div class="grab"></div>${body}</div></div>`;
+  // 閉じるのは×ボタン（下に引いて閉じる見た目にすると、ブラウザの「引っぱって再読み込み」を誘ってしまう）
+  const busy = sh.stage === 'progress' || sh.stage === 'buying';
+  return `<div class="sheet-w"><div class="scrim" data-a="closeSheet"></div><div class="sheet">${busy ? '' : `<button class="shx" data-a="closeSheet" aria-label="閉じる">${I.x}</button>`}${body}</div></div>`;
 }
-const doneHtml = (title, sub, btn) => `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0 4px;text-align:center"><span class="done-ic">${I.check(30)}</span><span class="t">${title}</span><span class="d">${sub}</span></div>
+const doneHtml = (title, sub, btn) => `<div class="cblk" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0 4px;text-align:center"><span class="done-ic">${I.check(30)}</span><span class="t">${title}</span><span class="d">${sub}</span></div>
   <button class="btn-s" style="height:52px;font-size:18px" data-a="closeSheet">${btn || '閉じる'}</button>`;
 const progHtml = (title, sh, extra) => `<span class="t">${title}</span>
   <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="h" style="font-size:48px;line-height:1" id="shPct">${Math.round(sh.prog * 100)}%</span>${extra || ''}</div>
