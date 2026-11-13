@@ -1,0 +1,2 @@
+Barlow / Barlow Condensed (Jeremy Tribby) — SIL Open Font License 1.1
+https://github.com/jpt/barlow  （Google Fonts の latin サブセット）

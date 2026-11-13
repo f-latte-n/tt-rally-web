@@ -4,11 +4,13 @@
 
 動画はブラウザ内だけで処理し、どこにも送信しません。
 
-- `index.html` 画面 / `worker.js` デマックス→デコード→ROI読み出し / `detect.js` 検出コア
+- `app.html` アプリ本体（Claude Design「画面デザイン」v0.1 の実装）。`app.js` 画面と操作 / `app.css` トークンと部品 /
+  `platform.js` 動画の取得元・保存先（Web と アプリの差し替え層） / `store.js` IndexedDB / `opfs-write.js` Web版の保存
+- `index.html` 速度計測ページ / `worker.js` デマックス→デコード→ROI読み出し / `detect.js` 検出コア
 - WebCodecs は安全なコンテキスト（HTTPS か localhost）でしか動かない。
 
 ```
-python3 -m http.server 8765    # ローカル: http://localhost:8765/
+python3 -m http.server 8765    # ローカル: http://localhost:8765/ （アプリ本体は /app.html。localhost では購入を試せる）
 ```
 
 ## 照合

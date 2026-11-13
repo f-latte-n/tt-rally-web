@@ -59,8 +59,10 @@ async function run(file, opts) {
   post({ type: 'info', codec: vt.codec, width: vt.video.width, height: vt.video.height, frames: samples.length,
          duration, fps: samples.length / (vt.samples_duration / vt.timescale) });
 
-  const { x: rx, y: ry, w: rw, h: rh } = PARAMS.roi;
-  const det = new Detector(), rgba = new Uint8ClampedArray(rw * rh * 4);
+  // opts.roi：台の位置から求めた球用ROI（640x360基準）。無ければ既定値
+  const P = opts.roi ? { ...PARAMS, roi: opts.roi } : PARAMS;
+  const { x: rx, y: ry, w: rw, h: rh } = P.roi;
+  const det = new Detector(P), rgba = new Uint8ClampedArray(rw * rh * 4);
   const pos = [], ts = [];
   let ctx = null, method = '';
   const pool = []; // copyTo用バッファの使い回し
@@ -80,7 +82,17 @@ async function run(file, opts) {
     }
     return { sumY: sy, sumU: su, sumV: sv, hashY: hy.toString(16) };
   }
-  let frameErr = null, wake = null, lastProg = 0, pending = 0, chain = Promise.resolve();
+  let frameErr = null, wake = null, lastProg = 0, lastPartial = 0, partialEvery = 1500, pending = 0, chain = Promise.resolve();
+  // 途中までの区間（解析中の画面で「見つかったラリー」を増やして見せる）。最後の区間は未確定なので除く
+  function postPartial() {
+    if (!opts.detect || !opts.partial || pos.length < 3) return;
+    const t0 = now(), n = pos.length, tm = new Float64Array(n);
+    for (let k = 0; k < n; k++) tm[k] = (ts[k] - ts[0]) / 1e6;
+    const segs = segment(track(pos, P).ev, tm, P);
+    const upto = tm[n - 1] - P.gap - P.post;
+    post({ type: 'partial', segs: segs.filter((g) => g[1] < upto), upto: tm[n - 1] });
+    partialEvery = Math.max(1500, (now() - t0) * 20); // 長い動画でも、この計算に使う時間は全体の5%まで
+  }
 
   // ROI（640x360基準）の読み出しを開始する。copyTo は非同期なので複数フレーム並行に投げ、
   // 戻り値の関数（RGBAを返す）は順番どおりに呼ぶ。
@@ -131,7 +143,7 @@ async function run(file, opts) {
       chain = chain.then(async () => {
         if (ts.length && frame.timestamp <= ts[ts.length - 1]) diag.tsBackward++;
         ts.push(frame.timestamp);
-        if (ts.length === 1) sendPreview(frame);
+        if (ts.length === 1) sendPreview(frame, P.roi);
         if (job) {
           const t = now(); const px = (await job)(); const t2 = now(); st.grab += t2 - t;
           pos.push(det.push(px));
@@ -142,6 +154,7 @@ async function run(file, opts) {
         if (wake) { const w = wake; wake = null; w(); }
         const t = now();
         if (t - lastProg > 250) { lastProg = t; post({ type: 'progress', done: ts.length, total: samples.length, elapsed: t - T0 }); }
+        if (t - lastPartial > partialEvery) { lastPartial = t; postPartial(); }
       });
     },
     error: (e) => { frameErr = e; if (wake) wake(); },
@@ -183,9 +196,9 @@ async function run(file, opts) {
   const times = new Float64Array(ts.length);
   for (let k = 0; k < ts.length; k++) times[k] = (ts[k] - ts[0]) / 1e6;
   if (opts.detect) {
-    const r = track(pos);
+    const r = track(pos, P);
     ev = r.ev; chains = r.ball.length;
-    segs = segment(ev, times);
+    segs = segment(ev, times, P);
   }
   st.post = now() - T1;
   const total = now() - T0;
@@ -194,10 +207,10 @@ async function run(file, opts) {
        [ev.buffer, times.buffer]);
 }
 
-function sendPreview(frame) {
+function sendPreview(frame, roi) {
   const w = 640, h = Math.round(640 * frame.displayHeight / frame.displayWidth);
   const c = new OffscreenCanvas(w, h);
   c.getContext('2d').drawImage(frame, 0, 0, w, h);
   const bmp = c.transferToImageBitmap();
-  post({ type: 'preview', bmp, roi: PARAMS.roi }, [bmp]);
+  post({ type: 'preview', bmp, roi }, [bmp]);
 }
