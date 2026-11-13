@@ -44,6 +44,7 @@
     // WebKit（iOS）は Blob を IndexedDB に入れられない（BlobURLs are not yet supported）ので、バイト列で持つ
     getThumb: (key) => tx('thumbs', 'readonly', (s) => s.get(key)).then((v) =>
       (!v || v instanceof Blob ? v : new Blob([v.buf], { type: v.type }))),
+    countThumbs: () => tx('thumbs', 'readonly', (s) => s.count()),
     putThumb: async (key, blob) => {
       const v = { type: blob.type, buf: await blob.arrayBuffer() };
       return tx('thumbs', 'readwrite', (s) => s.put(v, key));

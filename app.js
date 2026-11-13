@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.7';
+const VER = '0.1.8';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -730,7 +730,8 @@ SCREENS.settings = () => {
      <button class="srow" data-a="storage"><span>アプリ内の保存容量</span><span class="muted" style="font-size:14px">${total ? MBf(total) : '0MB'} ›</span></button>
      <button class="srow" data-a="privacy"><span>プライバシー</span><span class="muted">›</span></button>`)}
     ${sgroup('このアプリについて', `<div class="srow" style="cursor:default"><span>バージョン</span><span class="h muted">${VER}</span></div>
-     <button class="srow" data-a="contact"><span>お問い合わせ</span><span class="muted">›</span></button>`)}
+     <button class="srow" data-a="contact"><span>お問い合わせ</span><span class="muted">›</span></button>
+     <button class="srow" data-a="diag"><span>診断情報</span><span class="muted">›</span></button>`)}
    </div></div>`;
 };
 SCREENS.storage = () => {
@@ -820,7 +821,7 @@ const SHEETS = {
 };
 function dlgHtml() {
   const d = S.dialog; if (!d) return '';
-  return `<div class="dlg-w"><div class="dlg bp">${CORNERS}<span class="h" style="font-size:20px;line-height:1.3">${esc(d.title)}</span><span class="muted" style="font-size:14px;line-height:1.6">${esc(d.body)}</span>
+  return `<div class="dlg-w"><div class="dlg bp">${CORNERS}<span class="h" style="font-size:20px;line-height:1.3">${esc(d.title)}</span><span class="muted" style="font-size:14px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere">${esc(d.body)}</span>
    <div style="display:grid;grid-template-columns:${d.single ? '1fr' : '1fr 1fr'};gap:8px;margin-top:6px">${d.single ? '' : `<button class="btn-s" data-a="dlgNo">${esc(d.no || 'キャンセル')}</button>`}<button class="${d.single ? 'btn-s' : 'ok'}${d.pri ? ' pri' : ''}" data-a="dlgOk">${esc(d.ok)}</button></div></div></div>`;
 }
 function ask(title, body, ok, onOk) { S.dialog = { title, body, ok, onOk }; render(); }
@@ -840,6 +841,12 @@ A.settings = () => go('settings');
 A.storage = () => go('storage');
 A.privacy = () => go('privacy');
 A.contact = () => toast('お問い合わせ先は準備中です');
+A.diag = async () => {
+  let n = '?'; try { n = await DB.countThumbs(); } catch (e) { n = '読めません: ' + errMsg(e); }
+  const lines = [`バージョン ${VER}`, navigator.userAgent, `サムネイル：記録 ${n} 枚／表示中 ${Object.keys(L.thumbs).length} 枚`,
+    `試合 ${S.matches.length} 件`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
+  alertDlg('診断情報', lines.join('\n'));
+};
 A.closeSheet = () => closeSheet();
 A.dlgNo = () => { const d = S.dialog; S.dialog = null; if (d && d.onNo) d.onNo(); if (!S.dialog) render(); };
 A.dlgOk = () => { const d = S.dialog; S.dialog = null; d.onOk(); if (!S.dialog) render(); };
@@ -970,6 +977,7 @@ A.relink = async () => {
   try { op = await P.pickVideo(); } catch (e) { if (!P.isCancel(e)) alertDlg('動画を開けませんでした', errMsg(e)); return; }
   const link = async () => {
     L.open[m.id] = op; m.source = op.source; await saveMatch(m);
+    for (const k of Object.keys(tFail)) if (k.startsWith(m.id + '/')) { delete tFail[k]; L.tReq.delete(k); }
     await prepMedia(m); PB.a = PB.b = -1; render(); toast('元の動画とつなぎ直しました');
   };
   if (m.source && m.source.size && op.source.size !== m.source.size) {
@@ -1150,13 +1158,20 @@ V.addEventListener('ended', () => { if (PB.onEnd && !PB.seeking) PB.onEnd(); });
 // ---------- サムネイル（解析後に裏で作る。元動画が消えても残るよう IndexedDB に保存）
 const TV = document.createElement('video');
 TV.muted = true; TV.playsInline = true; TV.setAttribute('playsinline', ''); TV.preload = 'auto';
+// iPhone はページに付いていない video を読み込まないことがあるので、見えない形でページに置く
+TV.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;z-index:-1';
+document.body.appendChild(TV);
+const tFail = {}; // サムネイルの失敗回数（同じものを何度も試さない。つなぎ直したら数え直す）
+// 診断情報（設定 → 診断情報 で見られる。実機で原因を調べるため）
+const diagLog = [];
+function diag(msg) { diagLog.push(new Date().toTimeString().slice(0, 8) + ' ' + msg); if (diagLog.length > 12) diagLog.shift(); console.warn(msg); }
 const tQ = []; let tBusy = false;
 function requestThumb(m, r, key) {
   if (L.tReq.has(key)) return;
   L.tReq.add(key);
   DB.getThumb(key).then((b) => {
     if (b) { L.thumbs[key] = URL.createObjectURL(b); softRender(); } else { tQ.push({ m, r, key }); pumpThumbs(); }
-  }).catch(() => {});
+  }).catch((e) => { diag('サムネイルを読めません: ' + errMsg(e)); tQ.push({ m, r, key }); pumpThumbs(); });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function frameReady(v, ms) {
@@ -1175,7 +1190,11 @@ async function pumpThumbs() {
       if (!S.matches.includes(j.m) || !j.m.rallies.includes(j.r)) continue;
       const url = await mediaUrl(j.m);
       if (!url) { L.tReq.delete(j.key); continue; } // 元動画が無い：つなぎ直したらまた作る
-      if (TV.src !== url) { TV.src = url; await once(TV, 'loadedmetadata', 15000); }
+      if (TV.src !== url || TV.readyState < 1) {
+        if (TV.src !== url) TV.src = url;
+        TV.load();
+        await Promise.race([once(TV, 'loadedmetadata', 15000), once(TV, 'error', 15000).then(() => { throw new Error('動画を読めません（' + (TV.error && TV.error.code) + '）'); })]);
+      }
       const [a, b] = rallySpan(j.m, j.r);
       const p = once(TV, 'seeked', 8000);
       TV.currentTime = Math.min(b, a + Math.min(1.8, (b - a) / 2));
@@ -1193,9 +1212,13 @@ async function pumpThumbs() {
       const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.7));
       if (blob) {
         L.thumbs[j.key] = URL.createObjectURL(blob); softRender();
-        await DB.putThumb(j.key, blob).catch((e) => console.warn('サムネイルを保存できませんでした', e && e.message));
-      }
-    } catch (e) { L.tReq.delete(j.key); }
+        await DB.putThumb(j.key, blob).catch((e) => diag('サムネイルを記録できません: ' + errMsg(e)));
+      } else diag('サムネイルの画像を作れません');
+    } catch (e) {
+      tFail[j.key] = (tFail[j.key] || 0) + 1;
+      diag('サムネイル失敗(' + tFail[j.key] + '): ' + errMsg(e));
+      if (tFail[j.key] < 3) L.tReq.delete(j.key); // 3回失敗したら、つなぎ直すまで試さない
+    }
   }
   tBusy = false;
 }
