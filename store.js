@@ -41,8 +41,13 @@
     allMatches: () => tx('matches', 'readonly', (s) => s.getAll()),
     putMatch: (m) => tx('matches', 'readwrite', (s) => s.put(m)),
     deleteMatch: (id) => tx('matches', 'readwrite', (s) => s.delete(id)),
-    getThumb: (key) => tx('thumbs', 'readonly', (s) => s.get(key)),
-    putThumb: (key, blob) => tx('thumbs', 'readwrite', (s) => s.put(blob, key)),
+    // WebKit（iOS）は Blob を IndexedDB に入れられない（BlobURLs are not yet supported）ので、バイト列で持つ
+    getThumb: (key) => tx('thumbs', 'readonly', (s) => s.get(key)).then((v) =>
+      (!v || v instanceof Blob ? v : new Blob([v.buf], { type: v.type }))),
+    putThumb: async (key, blob) => {
+      const v = { type: blob.type, buf: await blob.arrayBuffer() };
+      return tx('thumbs', 'readwrite', (s) => s.put(v, key));
+    },
     deleteThumbs: (prefix) => tx('thumbs', 'readwrite', (s) => s.delete(IDBKeyRange.bound(prefix, prefix + '￿'))),
     get: (key) => tx('kv', 'readonly', (s) => s.get(key)),
     set: (key, v) => tx('kv', 'readwrite', (s) => s.put(v, key)),

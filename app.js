@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.1';
+const VER = '0.1.2';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -1134,6 +1134,15 @@ function requestThumb(m, r, key) {
     if (b) { L.thumbs[key] = URL.createObjectURL(b); softRender(); } else { tQ.push({ m, r, key }); pumpThumbs(); }
   }).catch(() => {});
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function frameReady(v, ms) {
+  return new Promise((ok) => { setTimeout(ok, ms); if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => ok()); });
+}
+function isBlank(g) { // 真っ黒（何も描けていない）か。数点だけ見る
+  const d = g.getImageData(0, 0, 176, 99).data;
+  for (let i = 0; i < d.length; i += 4 * 97) if (d[i] > 8 || d[i + 1] > 8 || d[i + 2] > 8) return false;
+  return true;
+}
 async function pumpThumbs() {
   if (tBusy) return; tBusy = true;
   while (tQ.length) {
@@ -1147,10 +1156,21 @@ async function pumpThumbs() {
       const p = once(TV, 'seeked', 8000);
       TV.currentTime = Math.min(b, a + Math.min(1.8, (b - a) / 2));
       await p;
+      // WebKit は seeked の直後だとまだ描けない（最初の1枚が真っ黒になる）ので、コマが届くのを待ち、黒ければ描き直す
+      await frameReady(TV, 400);
       const c = document.createElement('canvas'); c.width = 176; c.height = 99;
-      c.getContext('2d').drawImage(TV, 0, 0, 176, 99);
+      const g = c.getContext('2d', { willReadFrequently: true });
+      for (let k = 0; ; k++) {
+        g.drawImage(TV, 0, 0, 176, 99);
+        if (!isBlank(g)) break;
+        if (k >= 3) break; // 本当に黒いコマならそのまま使う
+        await sleep(250);
+      }
       const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.7));
-      if (blob) { await DB.putThumb(j.key, blob); L.thumbs[j.key] = URL.createObjectURL(blob); softRender(); }
+      if (blob) {
+        L.thumbs[j.key] = URL.createObjectURL(blob); softRender();
+        await DB.putThumb(j.key, blob).catch((e) => console.warn('サムネイルを保存できませんでした', e && e.message));
+      }
     } catch (e) { L.tReq.delete(j.key); }
   }
   tBusy = false;
