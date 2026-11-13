@@ -158,7 +158,7 @@ svg.i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: rou
 .mhead { height: 44px; display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 6px; padding: 0 4px; flex: none; }
 .mhead .mid { border: 0; background: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 0; }
 .mhead .mid > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.infobar { height: 44px; flex: none; border: 0; border-top: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-ink); font-size: 14px; font-weight: 700;
+.infobar { width: 100%; height: 44px; flex: none; border: 0; border-top: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-ink); font-size: 14px; font-weight: 700;
            cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
 .vbox { position: relative; width: 100%; aspect-ratio: 16/9; flex: none; background: var(--video); overflow: hidden; }
 .vbox video, .vfill video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
@@ -184,7 +184,7 @@ svg.i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: rou
 .tlbar .sg.off { background: var(--ink-3); opacity: .3; }
 .tlbar .sg.on { top: 0; height: 28px; background: var(--ink); }
 .tlax { display: flex; justify-content: space-between; font: 600 12px var(--font-h); color: var(--ink-3); }
-.chips { display: flex; padding: 8px 16px 10px 17px; flex: none; border-bottom: 1px solid var(--line); }
+.chips { display: flex; padding: 8px 16px 10px 17px; flex: none; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; background: var(--bg); }
 .chip { flex: 1; margin-left: -1px; height: 44px; padding: 0 14px; border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 14px; font-weight: 600;
         display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 .chip .c { font: 600 14px var(--font-h); opacity: .6; }

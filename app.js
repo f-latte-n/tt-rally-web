@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.0';
+const VER = '0.1.1';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -439,7 +439,6 @@ SCREENS.match = () => {
     <span class="badge ${st}">${ST[st]}</span>
     <button class="btn-t" style="padding:0 10px 0 6px" data-a="info">編集</button>
    </div>
-   ${!m.title && !m.opp ? '<button class="infobar" data-a="info"><span>対戦相手と大会名を入力</span><span>›</span></button>' : ''}
    <div class="vbox" ${missing ? '' : 'data-vslot'}>
     ${missing ? `<div class="ph" style="position:absolute;inset:0;opacity:.4"></div><div class="vmiss"><span class="h" style="font-size:18px">元動画が見つかりません</span><span style="font-size:12px;color:rgba(255,255,255,.7)">再生するには、動画を選び直してください</span></div>` : `
     <span class="lbl">${selR ? 'ラリー ' + no(selR) : ''}</span>
@@ -448,6 +447,8 @@ SCREENS.match = () => {
     <span class="tm" id="vTime"></span>
     <div class="pbar"><div id="vBar"></div></div>`}
    </div>
+   <div class="scroll" data-sk="match">
+   ${!m.title && !m.opp ? '<button class="infobar" data-a="info"><span>対戦相手と大会名を入力</span><span>›</span></button>' : ''}
    ${missing ? '<div class="missbar"><span style="flex:1;font-size:13px;line-height:1.5;font-weight:600">写真ライブラリから同じ動画を選ぶと、また再生できます。★とサムネイルは残っています。</span><button data-a="relink">動画を選び直す</button></div>' : ''}
    <div class="tl">
     <div class="hd"><span class="sec-l">タイムライン</span>
@@ -461,7 +462,6 @@ SCREENS.match = () => {
     <button class="chip ${S.filter === 'all' ? 'on' : ''}" data-a="filter" data-f="all"><span class="l">すべて</span><span class="c">${rs.length}</span></button>
     <button class="chip star ${S.filter === 'star' ? 'on' : ''}" data-a="filter" data-f="star"><span class="l">★</span><span class="c">${stars}</span></button>
    </div>
-   <div class="scroll" data-sk="match">
     <div class="lhead"><span class="h" style="font-size:18px">${S.filter === 'star' ? `${fl.length}本 / 全${rs.length}本` : `${rs.length}本のラリー`}</span><span style="font-size:12px" class="faint">${esc(m.opp)}</span></div>
     ${!rs.length ? '<div class="empty">ラリーが見つかりませんでした。<br>「見逃したラリーを追加」で手動で追加できます。</div>' : !fl.length ? '<div class="empty">★のラリーはありません</div>' : ''}
     ${fl.length ? `<div class="rows">${rows}</div>` : ''}
