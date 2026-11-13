@@ -44,7 +44,8 @@ self.addEventListener('fetch', (e) => {
 
 async function networkFirst(req) {
   const cached = () => caches.match(req, { ignoreSearch: true });
-  const net = fetch(req); // しまう版は install で入れたものだけ（JS・CSS と版をそろえるため）
+  // no-cache：HTTP キャッシュ（GitHub Pages は10分）に古い HTML が残っていても、サーバーに確かめる
+  const net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }); // しまう版は install で入れたものだけ（JS・CSS と版をそろえるため）
   net.catch(() => {});
   const timeout = new Promise((ok) => setTimeout(ok, 3000));
   try {

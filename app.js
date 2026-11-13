@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.10';
+const VER = '0.1.11';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -746,6 +746,7 @@ SCREENS.settings = () => {
      <button class="srow" data-a="storage"><span>アプリ内の保存容量</span><span class="muted" style="font-size:14px">${total ? MBf(total) : '0MB'} ›</span></button>
      <button class="srow" data-a="privacy"><span>プライバシー</span><span class="muted">›</span></button>`)}
     ${sgroup('このアプリについて', `<div class="srow" style="cursor:default"><span>バージョン</span><span class="h muted">${VER}</span></div>
+     ${P.native ? '' : '<button class="srow" data-a="update"><span>最新版を確認</span><span class="muted">›</span></button>'}
      <button class="srow" data-a="contact"><span>お問い合わせ</span><span class="muted">›</span></button>
      <button class="srow" data-a="diag"><span>診断情報</span><span class="muted">›</span></button>`)}
    </div></div>`;
@@ -868,6 +869,24 @@ A.settings = () => go('settings');
 A.storage = () => go('storage');
 A.privacy = () => go('privacy');
 A.contact = () => toast('お問い合わせ先は準備中です');
+// 最新版を確認：公開中の app.html の版を見て、違えば読み込み直す
+// （cache:'reload' で取ると HTTP キャッシュも新しくなり、読み込み直したときに古い HTML が出ない）
+A.update = async () => {
+  toast('確認しています…');
+  let v;
+  try {
+    const r = await fetch('app.html?check=' + Date.now(), { cache: 'reload' });
+    await fetch('app.html', { cache: 'reload' }).catch(() => {});
+    v = ((await r.text()).match(/app\.js\?v=([0-9.]+)/) || [])[1];
+  } catch (e) { toast('通信できないため確認できません'); return; }
+  if (!v) { toast('確認できませんでした'); return; }
+  if (v === VER) { toast(`最新版です（${VER}）`); return; }
+  const unsaved = S.matches.some((m) => needsSave(m) && L.open[m.id] && L.open[m.id].url);
+  ask('新しい版があります', `${VER} → ${v}\nアプリを読み込み直して更新します。` + (unsaved ? '\n\n保存していない試合は、元の動画を選び直す必要があります。' : ''), '更新する', async () => {
+    try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) { /* 読み込み直せば入れ替わる */ }
+    location.reload();
+  });
+};
 A.persistInfo = () => {
   const v = L.persist;
   alertDlg('データの保護', v === true
