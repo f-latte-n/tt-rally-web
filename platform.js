@@ -123,7 +123,7 @@
       } finally { h.remove(); }
     }
     // Web：OPFS。書き込みは Worker の同期アクセスハンドルで行う（Safari でも使える）
-    if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch (e) { /* 任意 */ } }
+    await persistStorage();
     const w = new Worker('opfs-write.js');
     try {
       return await new Promise((ok, ng) => {
@@ -170,12 +170,25 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
 
+  // 保存データを「ブラウザが空き容量不足で自動削除しない」扱いにしてもらう。true=認められた / false=認められない / null=不明
+  // Firefox は確認の画面が出るので、自分からは頼まない（保存のときだけ頼む）
+  async function persistStorage(ask = true) {
+    if (native) return true; // アプリ専用領域は OS が勝手に消さない
+    const st = navigator.storage;
+    if (!st || !st.persisted) return null;
+    try {
+      if (await st.persisted()) return true;
+      if (!ask || !st.persist) return false;
+      return await st.persist();
+    } catch (e) { return null; }
+  }
+
   self.RallyPlatform = {
     native, platform, isAndroid,
     // Android は SW デコードが速くて正確（CLAUDE.md）。SW で扱えない形式は worker.js が既定に戻す
     decodeHw: isAndroid ? 'prefer-software' : '',
     canExport: !native,
     pickVideo, reopen, isCancel,
-    writeClip, clipUrl, clipFile, deleteClip, exportClip,
+    writeClip, clipUrl, clipFile, deleteClip, exportClip, persistStorage,
   };
 })();

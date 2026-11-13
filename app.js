@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.9';
+const VER = '0.1.10';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -58,7 +58,7 @@ const S = {
   a2hsHidden: false, // ホーム画面の「ホーム画面に追加」の案内を×で閉じた
 };
 // 実行中だけの情報：開いた元動画（試合ID → {file,url,source} / null=見つからない / {needsPermission}）、サムネイルの URL
-const L = { open: {}, thumbs: {}, tReq: new Set(), scroll: {}, noSave: new Set() }; // noSave: 「保存しない」を選んだ試合（このページを開いている間）
+const L = { open: {}, thumbs: {}, tReq: new Set(), scroll: {}, noSave: new Set(), persist: undefined }; // persist: データの保護（true/false/null=不明、undefined=確認中） // noSave: 「保存しない」を選んだ試合（このページを開いている間）
 const root = document.getElementById('app');
 const scr = () => S.stack[S.stack.length - 1];
 const cur = () => S.matches.find((m) => m.id === S.cur) || null;
@@ -284,6 +284,8 @@ function obScreen(tips) {
 }
 SCREENS.onboard = () => obScreen(false);
 SCREENS.tips = () => obScreen(true);
+
+const persistLabel = () => ({ true: '有効', false: '無効', null: '不明' })[String(L.persist)] || '確認中';
 
 // ---------- ホーム画面に追加（PWA）
 // iPhone はブラウザから追加できる仕組みがないので、手順を案内する。Android・PC の Chrome は beforeinstallprompt で追加できる。
@@ -740,6 +742,7 @@ SCREENS.settings = () => {
    <div class="scroll" style="padding:8px 16px 40px;display:flex;flex-direction:column;gap:22px">
     ${canInstall() ? sgroup('使いはじめに', '<button class="srow" data-a="install"><span>ホーム画面に追加</span><span class="muted">›</span></button>') : ''}
     ${sgroup('撮影と保存', `<button class="srow" data-a="tips"><span>撮影のコツ</span><span class="muted">›</span></button>
+     <button class="srow" data-a="persistInfo"><span>データの保護</span><span class="muted" style="font-size:14px">${persistLabel()} ›</span></button>
      <button class="srow" data-a="storage"><span>アプリ内の保存容量</span><span class="muted" style="font-size:14px">${total ? MBf(total) : '0MB'} ›</span></button>
      <button class="srow" data-a="privacy"><span>プライバシー</span><span class="muted">›</span></button>`)}
     ${sgroup('このアプリについて', `<div class="srow" style="cursor:default"><span>バージョン</span><span class="h muted">${VER}</span></div>
@@ -865,6 +868,13 @@ A.settings = () => go('settings');
 A.storage = () => go('storage');
 A.privacy = () => go('privacy');
 A.contact = () => toast('お問い合わせ先は準備中です');
+A.persistInfo = () => {
+  const v = L.persist;
+  alertDlg('データの保護', v === true
+    ? '有効です。端末の空き容量が少なくなっても、ブラウザが保存したデータを自動で消すことはありません。\n\nただし、ホーム画面のアイコンを削除したり、ブラウザのデータを消したりすると、保存したデータも消えます。大切な動画は「書き出し」で写真にも残してください。'
+    : (v === false ? '有効になっていません。端末の空き容量が少なくなると、ブラウザが保存したデータを消すことがあります。' : 'このブラウザでは確かめられません。端末の空き容量が少なくなると、ブラウザが保存したデータを消すことがあります。')
+      + (standalone() || P.native ? '' : '\n\nホーム画面に追加して、そこから開くと有効になりやすくなります。') + '\n\n大切な動画は「書き出し」で写真にも残してください。');
+};
 A.install = async () => {
   if (!installEvt) { S.sheet = { type: 'a2hs' }; render(); return; }
   const e = installEvt; installEvt = null;
@@ -875,7 +885,7 @@ A.a2hsHide = () => { S.a2hsHidden = true; DB.set('a2hsHidden', true); render(); 
 A.diag = async () => {
   let n = '?'; try { n = await DB.countThumbs(); } catch (e) { n = '読めません: ' + errMsg(e); }
   const lines = [`バージョン ${VER}`, navigator.userAgent, `サムネイル：記録 ${n} 枚／表示中 ${Object.keys(L.thumbs).length} 枚`,
-    `試合 ${S.matches.length} 件`, `ホーム画面から：${standalone() ? 'はい' : 'いいえ'}／SW：${navigator.serviceWorker && navigator.serviceWorker.controller ? '動作中' : 'なし'}`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
+    `試合 ${S.matches.length} 件`, `データの保護：${persistLabel()}`, `ホーム画面から：${standalone() ? 'はい' : 'いいえ'}／SW：${navigator.serviceWorker && navigator.serviceWorker.controller ? '動作中' : 'なし'}`, '', ...(diagLog.length ? diagLog : ['（エラーの記録なし）'])];
   alertDlg('診断情報', lines.join('\n'));
 };
 A.closeSheet = () => closeSheet();
@@ -1116,6 +1126,7 @@ A.saveGo = async () => {
     const plan = self.RallyRemux.planClip(await self.RallySource.readMoov(op.file), rs.map((r) => [r.start, r.end]));
     const name = `${m.id}_${Date.now().toString(36)}.mp4`;
     const res = await P.writeClip(name, plan, op, (p) => { sh.prog = p; updSheetProg(); });
+    P.persistStorage(false).then((v) => { L.persist = v; }); // 保存のときに頼んだ結果を反映
     if (res.bytes !== plan.size) throw new Error(`保存した大きさが違います（${res.bytes} / ${plan.size}）`);
     // 元動画の時刻 → 保存した動画の時刻（ラリーはキーフレームから始まるので、少し前から入っている）
     for (const r of rs) {
@@ -1270,6 +1281,9 @@ async function pumpThumbs() {
   if ('serviceWorker' in navigator && !P.native && /^https?:$/.test(location.protocol)) {
     navigator.serviceWorker.register('sw.js?v=' + VER).catch((e) => diag('Service Worker: ' + errMsg(e)));
   }
+  // 保存データを自動削除しない扱いにしてもらう（結果は 設定 → データの保護）
+  L.persist = await P.persistStorage(!/Firefox\//.test(navigator.userAgent));
+  if (scr() === 'settings') render();
   // 未保存の試合の元動画が、まだ開けるか確かめる（開けなければ「元動画なし」）
   for (const m of S.matches) {
     if (m.clip) continue;
