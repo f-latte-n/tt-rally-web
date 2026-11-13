@@ -1,7 +1,7 @@
 // 画面と操作。Claude Design「（アプリ名）画面デザイン」v0.1 を実装したもの（採用案 1b・1c・1f・1i）。
 // 動画の取得元・保存先は platform.js、保存データは store.js、検出は worker.js、切り貼りは remux.js。
 'use strict';
-const VER = '0.1.6';
+const VER = '0.1.7';
 const P = self.RallyPlatform, DB = self.RallyStore;
 const CFG = {
   ads: false, // 広告 SDK は未導入。true にすると広告枠（320×50 の仮置き）を出す
@@ -185,9 +185,10 @@ root.addEventListener('touchmove', (e) => {
 
 // ---------- 保存せずに離れようとしたら、保存を促す
 // iPhone など、元動画を選び直さないと開き直せない（ファイルのハンドルを持てない）とき
-function needsSave(m) {
-  return !!m && status(m) === 'unsaved' && m.rallies.length > 0 && m.source && m.source.kind === 'file' && !L.noSave.has(m.id);
+function unsavedFile(m) {
+  return !!m && status(m) === 'unsaved' && m.rallies.length > 0 && !!m.source && m.source.kind === 'file';
 }
+function needsSave(m) { return unsavedFile(m) && !L.noSave.has(m.id); }
 function askSave(m, proceed) {
   if (!needsSave(m)) return false;
   S.dialog = {
@@ -494,6 +495,7 @@ SCREENS.match = () => {
     <div class="pbar"><div id="vBar"></div></div>`}
    </div>
    <div class="scroll" data-sk="match">
+   ${unsavedFile(m) ? `<div class="savebar"><div style="flex:1;display:flex;flex-direction:column;gap:2px"><b>調整が済んだら保存してください</b><span>保存後は調整できません。保存すると元の動画なしで見られます。</span></div><button data-a="save">保存する</button></div>` : ''}
    ${!m.title && !m.opp ? '<button class="infobar" data-a="info"><span>対戦相手と大会名を入力</span><span>›</span></button>' : ''}
    ${missing ? '<div class="missbar"><span style="flex:1;font-size:13px;line-height:1.5;font-weight:600">写真ライブラリから同じ動画を選ぶと、また再生できます。★とサムネイルは残っています。</span><button data-a="relink">動画を選び直す</button></div>' : ''}
    <div class="tl">
